@@ -1,0 +1,25 @@
+{
+  "destination": "Ubbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "events": [
+    {
+      "type": "message",
+      "webhookEventId": "01K7B1N0000000000000000005",
+      "timestamp": 1791869400000,
+      "mode": "active",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "source": {
+        "type": "user",
+        "userId": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "replyToken": "00000000000000000000000000000005",
+      "message": {
+        "type": "file",
+        "id": "537629183902005",
+        "fileName": "order-A202610130001.pdf",
+        "fileSize": 24576
+      }
+    }
+  ]
+}

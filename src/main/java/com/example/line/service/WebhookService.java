@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.bot.jackson.ModelObjectMapper;
 import com.linecorp.bot.webhook.model.CallbackRequest;
 import com.linecorp.bot.webhook.model.Event;
+import com.linecorp.bot.webhook.model.MessageEvent;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
@@ -27,14 +29,19 @@ public class WebhookService {
     }
 
     public void submit(byte[] body) {
+        long receivedNanos = System.nanoTime();
         try {
-            executor.execute(() -> process(body));
+            executor.execute(() -> process(body, receivedNanos));
         } catch (RejectedExecutionException e) {
             log.error("LINE webhook not queued; returning 200 per acknowledgement policy");
         }
     }
 
     void process(byte[] body) {
+        process(body, System.nanoTime());
+    }
+
+    void process(byte[] body, long receivedNanos) {
         final CallbackRequest request;
         try {
             request = mapper.readValue(body, CallbackRequest.class);
@@ -48,16 +55,22 @@ public class WebhookService {
             return;
         }
         for (Event event : request.events()) {
-            processEvent(event);
+            processEvent(event, receivedNanos);
         }
     }
 
-    private void processEvent(Event event) {
+    private void processEvent(Event event, long receivedNanos) {
         if (event == null || event.webhookEventId() == null || event.webhookEventId().isBlank()) {
             log.warn("Skipping LINE event without webhookEventId");
             return;
         }
         String id = event.webhookEventId();
+        // Do not retain a short-lived replyToken behind slow/busy workers.
+        // Measure from this HTTP delivery, not LINE timestamp (redeliveries retain it).
+        if (event instanceof MessageEvent && System.nanoTime() - receivedNanos > TimeUnit.SECONDS.toNanos(15)) {
+            log.warn("Skipping stale queued reply eventId={}; receipt age exceeds 15 seconds", id);
+            return;
+        }
         boolean acquired = false;
         try {
             boolean redelivery = event.deliveryContext() != null

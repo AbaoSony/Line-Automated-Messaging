@@ -1,0 +1,9 @@
+{
+  "to": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "messages": [
+    {
+      "type": "text",
+      "text": "hello from push"
+    }
+  ]
+}

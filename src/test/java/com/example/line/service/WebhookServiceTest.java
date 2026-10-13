@@ -127,6 +127,17 @@ class WebhookServiceTest {
     }
 
     @Test
+    void queuedReplyOlderThan15SecondsIsNotSent() throws Exception {
+        var messages = mock(LineMessageService.class);
+        var service = new WebhookService(Runnable::run,
+                new EventDispatcher(List.of(new MessageEventHandler(messages))), cache());
+        service.process(payload("stale", false,
+                "\"type\":\"message\",\"replyToken\":\"reply\",\"message\":{\"type\":\"text\",\"id\":\"1\",\"text\":\"hello\"}"),
+                System.nanoTime() - TimeUnit.SECONDS.toNanos(16));
+        verifyNoInteractions(messages);
+    }
+
+    @Test
     void rejectionDoesNotClaimAnIdOrProcessOnRequestThread() {
         var dedup = mock(EventDeduplicator.class);
         var dispatcher = mock(EventDispatcher.class);

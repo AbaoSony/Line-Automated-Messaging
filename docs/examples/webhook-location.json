@@ -1,0 +1,27 @@
+{
+  "destination": "Ubbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "events": [
+    {
+      "type": "message",
+      "webhookEventId": "01K7B1N0000000000000000004",
+      "timestamp": 1791869400000,
+      "mode": "active",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "source": {
+        "type": "user",
+        "userId": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "replyToken": "00000000000000000000000000000004",
+      "message": {
+        "type": "location",
+        "id": "537629183902004",
+        "title": "台北车站",
+        "address": "台北市中正区北平西路3号",
+        "latitude": 25.0478,
+        "longitude": 121.517
+      }
+    }
+  ]
+}

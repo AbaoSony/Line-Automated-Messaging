@@ -22,6 +22,14 @@ class LineClientConfigTest {
     }
 
     @Test
+    void enabledInternalPushRequiresSeparateToken() {
+        runner.withPropertyValues("line.bot.channel-secret=test-secret", "line.bot.channel-token=test-token",
+                "line.internal-push.enabled=true")
+                .run(context -> assertThat(context.getStartupFailure()).hasRootCauseMessage(
+                        "Set LINE_INTERNAL_PUSH_TOKEN when LINE_INTERNAL_PUSH_ENABLED=true"));
+    }
+
+    @Test
     void reportsBothMissingProperties() {
         runner.run(context -> assertThat(context.getStartupFailure())
                 .hasRootCauseMessage("Missing required LINE configuration: line.bot.channel-secret (LINE_CHANNEL_SECRET), "

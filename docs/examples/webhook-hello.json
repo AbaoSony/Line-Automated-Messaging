@@ -1,0 +1,24 @@
+{
+  "destination": "Ubbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "events": [
+    {
+      "type": "message",
+      "webhookEventId": "01K7B1N0000000000000000009",
+      "timestamp": 1791869400000,
+      "mode": "active",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "source": {
+        "type": "user",
+        "userId": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "replyToken": "00000000000000000000000000000009",
+      "message": {
+        "type": "text",
+        "id": "537629183902009",
+        "text": "hello"
+      }
+    }
+  ]
+}

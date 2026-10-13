@@ -1,6 +1,10 @@
 server:
   port: 8080
 
+logging:
+  level:
+    com.linecorp.bot.client.wire: OFF
+
 line:
   bot:
     # Empty defaults allow LineProperties to report missing values clearly.
@@ -12,3 +16,10 @@ line:
     dedup-ttl: 24h
     dedup-max-entries: 10000
     content-max-bytes: 10485760
+  send:
+    max-attempts: 3
+    attempt-timeout: 3s
+    initial-backoff: 200ms
+  internal-push:
+    enabled: ${LINE_INTERNAL_PUSH_ENABLED:false}
+    token: ${LINE_INTERNAL_PUSH_TOKEN:}

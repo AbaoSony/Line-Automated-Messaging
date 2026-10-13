@@ -1,0 +1,18 @@
+{
+  "destination": "Ubbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "events": [
+    {
+      "type": "unfollow",
+      "webhookEventId": "01K7B1N0000000000000000007",
+      "timestamp": 1791869400000,
+      "mode": "active",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "source": {
+        "type": "user",
+        "userId": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ]
+}

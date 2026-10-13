@@ -2,6 +2,9 @@
 
 JDK 17、Maven 3.6.3+、Spring Boot 3.5.16、LINE SDK 10.2.0。
 
+接口契约、完整收发 JSON、模拟联调与真实 LINE 对接步骤见 [接口文档](docs/接口文档.md)。
+后续接口变更必须同步更新该文档及其模拟数据，维护规则见 [AGENTS.md](AGENTS.md)。
+
 ## 运行
 
 在仓库根目录的 PowerShell 中执行（先通过部署环境或本地会话设置真实凭证）：
@@ -48,7 +51,9 @@ Missing required LINE configuration: line.bot.channel-secret (LINE_CHANNEL_SECRE
 - `src/test/java/com/example/line/HealthIntegrationTest.java`：真实 HTTP 健康接口测试。
 - `.gitignore`：忽略构建、临时工具及本地凭证文件。
 
-已实现 Webhook、文本 Reply、事件分发与内容下载示例；Push 尚未在本阶段实现。
+已实现 Webhook、文本 Reply Echo、Push、消息构造、事件分发与内容下载示例。
+`POST /internal/push` 默认关闭，启用需要 `LINE_INTERNAL_PUSH_ENABLED=true`
+及独立的 `LINE_INTERNAL_PUSH_TOKEN`，请求头为 `X-Internal-Token`。
 
 ## SDK 核实来源
 
@@ -58,6 +63,8 @@ Missing required LINE configuration: line.bot.channel-secret (LINE_CHANNEL_SECRE
 
 已直接检查该版本源码，客户端为 `com.linecorp.bot.messaging.client.MessagingApiClient`，
 通过 `MessagingApiClient.builder(channelToken).build()` 创建，未使用旧版 `LineMessagingClient`。
+
+实际 Bean 创建时设置 `usingDefaultLogger(false)`，并关闭 SDK wire logger，防止默认报文日志记录凭证和消息内容。
 
 ## Webhook 接收
 
@@ -93,6 +100,8 @@ Missing required LINE configuration: line.bot.channel-secret (LINE_CHANNEL_SECRE
 缓存满时拒绝新 ID 并记录处理失败日志，不驱逐仍有效的去重记录。
 缓存仅限单进程，重启清空、多个实例不共享，TTL 到期后相同事件可再次处理。
 HTTP 200 后的异步失败不会自动触发 LINE 重投递；当前没有后台重试。
+Push 单次调用会对 5xx/网络错误做有限指数退避重试，并从首次请求起复用 Retry Key；
+Reply 不自动重试，消息在本次入站队列中等待超过 15 秒时跳过回复。
 远端已执行但客户端超时的情况仍可能重复产生副作用，不能声称 exactly-once。
 换 Redis 时替换该接口 Bean，实现原子抢占、成功 TTL、处理中租约及安全释放。
 
@@ -168,3 +177,21 @@ try (OutputStream output = Files.newOutputStream(destination, StandardOpenOption
 - 签名：https://developers.line.biz/en/docs/messaging-api/verify-webhook-signature/
 - Webhook 与重投递：https://developers.line.biz/en/docs/messaging-api/receiving-messages/
 - 内容下载：https://developers.line.biz/en/reference/messaging-api/#get-content
+
+## 消息发送与真实 echo 验收
+
+`LineMessageService` 提供 `replyText/replyMessages/pushText/pushMessages`。
+每次封装校验 1..5 条消息；`LineMessages` 提供文本、贴图、图片、Flex 卡片和 Quick Reply 工厂。
+Reply 不计入月度消息额度，业务优先使用 Reply；Push 会消耗额度。
+Push 默认总尝试 3 次，等待每次最多 3s，退避 200ms、400ms；4xx 不重试，
+409 带 accepted-request-id 视为已接受。详细请求、错误体和配置见接口文档。
+
+真实联调：
+
+1. 配置真实 `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_TOKEN`，运行 `mvn spring-boot:run`。
+2. 配置公网 HTTPS Webhook URL `https://<域名>/line/webhook` 并启用 Webhook，Verify 应成功。
+3. 用 LINE 添加机器人为好友，发送 `hello`，验收收到完全相同的 `hello`。
+4. 若收到多条，检查官方账号自动回复设置；若无回声，检查签名与 LINE send failed 日志。
+
+本地双向 SDK 模拟：`mvn -Dtest=DocumentedFlowIntegrationTest test`；
+全部自动测试：`mvn test`。模拟不替代真实 Token、用户与公网环境的验收。

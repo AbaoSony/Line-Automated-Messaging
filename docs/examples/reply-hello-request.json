@@ -1,0 +1,9 @@
+{
+  "replyToken": "00000000000000000000000000000009",
+  "messages": [
+    {
+      "type": "text",
+      "text": "hello"
+    }
+  ]
+}

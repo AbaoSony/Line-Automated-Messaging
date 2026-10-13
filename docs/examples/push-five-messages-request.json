@@ -1,0 +1,59 @@
+{
+  "to": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "messages": [
+    {
+      "type": "text",
+      "text": "hello"
+    },
+    {
+      "type": "sticker",
+      "packageId": "446",
+      "stickerId": "1988"
+    },
+    {
+      "type": "image",
+      "originalContentUrl": "https://example.com/order.png",
+      "previewImageUrl": "https://example.com/order-preview.png"
+    },
+    {
+      "type": "flex",
+      "altText": "订单通知",
+      "contents": {
+        "type": "bubble",
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "contents": [
+            {
+              "type": "text",
+              "text": "订单通知",
+              "weight": "bold",
+              "wrap": true
+            },
+            {
+              "type": "text",
+              "text": "订单 A202610130001 已发货",
+              "wrap": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "text",
+      "text": "请选择操作",
+      "quickReply": {
+        "items": [
+          {
+            "type": "action",
+            "action": {
+              "type": "message",
+              "label": "查询订单",
+              "text": "查询订单"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
