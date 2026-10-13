@@ -6,3 +6,9 @@ line:
     # Empty defaults allow LineProperties to report missing values clearly.
     channel-secret: ${LINE_CHANNEL_SECRET:}
     channel-token: ${LINE_CHANNEL_TOKEN:}
+  webhook:
+    workers: 4
+    queue-capacity: 256
+    dedup-ttl: 24h
+    dedup-max-entries: 10000
+    content-max-bytes: 10485760

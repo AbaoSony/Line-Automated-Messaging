@@ -1,0 +1,14 @@
+{
+  "destination": "Utestbot",
+  "events": [
+    {
+      "type": "follow",
+      "webhookEventId": "local-follow-demo-001",
+      "timestamp": 1791867600000,
+      "mode": "active",
+      "deliveryContext": { "isRedelivery": false },
+      "source": { "type": "user", "userId": "Utestuser" },
+      "replyToken": "local-test-reply-token"
+    }
+  ]
+}
