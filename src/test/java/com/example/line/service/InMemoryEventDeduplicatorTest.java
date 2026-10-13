@@ -31,6 +31,32 @@ class InMemoryEventDeduplicatorTest {
     }
 
     @Test
+    void retentionStartsOnCompletionAndExpiresAtExactBoundary() {
+        Clock clock = mock(Clock.class);
+        Instant start = Instant.parse("2026-01-01T00:00:00Z");
+        when(clock.instant()).thenReturn(start);
+        var cache = new InMemoryEventDeduplicator(Duration.ofSeconds(60), 10, clock);
+        assertThat(cache.tryAcquire("event")).isTrue();
+        when(clock.instant()).thenReturn(start.plusSeconds(30));
+        cache.complete("event");
+        when(clock.instant()).thenReturn(start.plusSeconds(89));
+        assertThat(cache.tryAcquire("event")).isFalse();
+        when(clock.instant()).thenReturn(start.plusSeconds(90));
+        assertThat(cache.tryAcquire("event")).isTrue();
+    }
+
+    @Test
+    void failedReservationCanBeRetriedWithoutAffectingOtherIds() {
+        var cache = new InMemoryEventDeduplicator(Duration.ofHours(24), 10, Clock.systemUTC());
+        assertThat(cache.tryAcquire("failed")).isTrue();
+        assertThat(cache.tryAcquire("other")).isTrue();
+        cache.complete("other");
+        cache.release("failed");
+        assertThat(cache.tryAcquire("failed")).isTrue();
+        assertThat(cache.tryAcquire("other")).isFalse();
+    }
+
+    @Test
     void concurrentDeliveryOnlyAcquiresOnce() throws Exception {
         var cache = new InMemoryEventDeduplicator(Duration.ofHours(24), 10,
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));

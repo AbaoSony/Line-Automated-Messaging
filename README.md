@@ -5,6 +5,46 @@ JDK 17、Maven 3.6.3+、Spring Boot 3.5.16、LINE SDK 10.2.0。
 接口契约、完整收发 JSON、模拟联调与真实 LINE 对接步骤见 [接口文档](docs/接口文档.md)。
 后续接口变更必须同步更新该文档及其模拟数据，维护规则见 [AGENTS.md](AGENTS.md)。
 
+部署前的覆盖范围与剩余问题见 [自查报告](docs/自查报告.md)。
+
+## 创建 LINE Channel 并取得凭证
+
+当前 Messaging API Channel 的入口是官方账号管理后台：先创建 LINE Official Account，
+启用 Messaging API 后自动生成 Channel，再到 Developers Console 配置；
+不能直接在 Console 新建该类型 Channel。[官方创建流程](https://developers.line.biz/en/docs/messaging-api/getting-started/)
+
+1. 登录 [LINE Official Account Manager](https://manager.line.biz/)，创建官方账号，已有账号可直接选择。
+2. 在账号设置的 Messaging API 页面启用 API，按向导登记开发者资料并选择 Provider。
+   Provider 关系不能随意迁移，使用本项目实际归属的 Provider。
+3. 用同一账号登录 [LINE Developers Console](https://developers.line.biz/console/)，
+   进入该 Provider，打开自动生成的 Messaging API Channel。
+4. 在 **Basic settings → Channel secret** 取得 Secret，对应环境变量 `LINE_CHANNEL_SECRET`。
+5. 在 **Messaging API → Channel access token (long-lived) → Issue** 生成 Token，
+   对应 `LINE_CHANNEL_TOKEN`。长期 Token 方便首次联调；生产可按官方建议使用 v2.1，
+   本项目没有自动签发/轮换 Token，过期或重签发后要更新运行环境并重启。
+   [Token 官方说明](https://developers.line.biz/en/docs/basics/channel-access-token/)
+
+这些值只放在运行环境或被忽略的本地配置，不放入 README、源码或截图。
+Channel Secret 用于入站验签，Access Token 用于 SDK 出站，不能混用。
+
+## 关闭自动回复与问候消息，配置 Webhook
+
+先按下文启动服务，并准备可从公网访问的 HTTPS 地址。
+
+1. 在 Channel 的 **Messaging API** 页找到 **Auto-reply messages** 和 **Greeting messages**，
+   点击各自 **Edit** 跳转 Official Account Manager，在响应设置中将两项设为 Disabled/关闭。
+   页面语言不同名称可能不同；保留 Webhook 开关。关闭这两项可避免平台自动消息与 echo 重复。
+2. 回到 **Messaging API → Webhook settings → Webhook URL → Edit**，填写：
+   `https://<公网域名>/line/webhook`，然后 **Update**。
+3. 点击 **Verify**，预期显示 **Success**；随后打开 **Use webhook**。
+4. 扫描该页机器人 QR code 添加好友，发送 `hello`，应收到一条 `hello` 回声。
+
+Verify 只验证 URL 可用；本服务接受 `events=[]`，这一步不会发送 Reply。
+真实文本收发还要靠第 4 步确认。[官方 Webhook 和自动消息设置](https://developers.line.biz/en/docs/messaging-api/building-bot/)
+
+LINE 要求 Webhook 为 HTTPS，证书须受信任，自签名证书不适用；
+本地服务继续用 HTTP，由隧道/反向代理终止 TLS。
+
 ## 运行
 
 在仓库根目录的 PowerShell 中执行（先通过部署环境或本地会话设置真实凭证）：
@@ -38,6 +78,115 @@ Missing required LINE configuration: line.bot.channel-secret (LINE_CHANNEL_SECRE
 ```
 
 也应分别验证仅缺一个配置和纯空白值。测试已覆盖这些情况及报错不包含另一项凭证。
+
+## 本地调试：ngrok 或 cloudflared
+
+先执行 `mvn spring-boot:run`，确认 `http://localhost:8080/health` 返回 UP。
+以下二选一，在另一个终端运行并保持进程存活；这里只提供命令，不会自动创建公网隧道。
+
+**ngrok**：按 [官方 Quickstart](https://ngrok.com/docs/share-localhost/quickstart) 安装 CLI、
+登录账号并取得 ngrok authtoken。该 token 属于 ngrok，不能使用 LINE 凭证替代。
+
+```powershell
+ngrok config add-authtoken '<你的 ngrok authtoken>'
+ngrok http 8080
+```
+
+复制终端显示的 HTTPS Forwarding 地址，例如 `https://<分配域名>.ngrok.app`，
+在 Console 填写 `https://<分配域名>.ngrok.app/line/webhook`。
+不要使用 OAuth、Basic Auth 或浏览器登录页拦截 Webhook，LINE 无法代替用户登录。
+ngrok 的 Traffic Inspector 可能保存请求和响应，真实联调时检查其留存设置，不要分享包含 Token/用户信息的抓包。
+
+**cloudflared**：按 [Cloudflare 官方文档](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) 安装后运行：
+
+```powershell
+cloudflared tunnel --url http://localhost:8080
+```
+
+复制生成的 `https://<随机域名>.trycloudflare.com`，填入
+`https://<随机域名>.trycloudflare.com/line/webhook`。Quick Tunnel 用于临时开发，
+域名重建后会变化；变更后重新 Update 和 Verify。不要加需要交互登录的 `--allowed-mail`。
+
+Docker Compose 将端口映射到宿主机 127.0.0.1:8080，宿主机上的隧道同样使用上述命令。
+隧道会转发本服务其他路径，公开调试期间保持 `LINE_INTERNAL_PUSH_ENABLED=false`。
+
+排查：
+
+| 表现 | 优先检查 |
+| --- | --- |
+| Verify 连接失败/502 | 应用是否启动、隧道是否还在、端口是否为 8080 |
+| Verify 返回 404 | URL 是否包含 `/line/webhook`，是否仍用旧隧道域名 |
+| Verify 返回 400 | Channel Secret 是否属于当前 Channel，代理是否修改原始请求字节 |
+| Verify 成功但不收到消息 | Use webhook、是否加好友、当前 URL、是否真的进行了文本发送 |
+| 收到两条消息 | Official Account Manager 的自动回复/问候消息是否关闭 |
+| 入站 200 但没有回声 | LINE send failed、Token 有效性、Reply 排队超时、线程池拒绝日志 |
+
+## Docker 与 Docker Compose
+
+需要运行中的 Docker Engine；Windows Docker Desktop 使用 Linux containers。
+Dockerfile 多阶段构建：JDK 17 + Maven 执行 `verify`（包含测试），运行层只放 JRE 17 和 JAR，
+以 UID/GID 10001 非 root 用户运行。由于测试读取文档模拟 JSON，构建阶段会复制 `docs/`。
+
+Compose 从当前进程环境或仓库根目录 `.env` 注入密钥。首次可执行：
+
+```powershell
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
+# 在本地编辑 .env，填写 LINE_CHANNEL_SECRET 和 LINE_CHANNEL_TOKEN。
+# 已存在的 .env 保留不覆盖。
+docker compose config --quiet
+docker compose up --build -d
+docker compose ps
+Invoke-RestMethod http://localhost:8080/health
+docker compose logs --tail 100 line-messaging
+```
+
+`.env` 已被 Git 和 Docker 构建上下文忽略；`.env.example` 只包含空配置项。
+Compose 缺少必需变量会直接失败，不会用默认假密钥启动。
+`mvn spring-boot:run` 不自动加载 `.env`，直接运行 Maven 时请设置进程环境变量。
+不要把 `docker compose config` 的展开配置或 `docker inspect` 输出发给他人，
+环境变量注入仍可被有 Docker 管理权限的人读取。
+
+单独构建/运行（先在当前终端设置两个 LINE 环境变量）：
+
+```powershell
+docker build -t line-messaging:local .
+docker run --rm --name line-messaging -p 127.0.0.1:8080:8080 -e LINE_CHANNEL_SECRET -e LINE_CHANNEL_TOKEN line-messaging:local
+```
+
+Compose 默认关闭内部 Push、只映射本机端口，文件系统只读，`/tmp` 使用临时挂载；
+内容下载若要持久化，需要另行配置可写存储，本示例没有自动落盘。
+密钥不作为 Docker ARG、构建 ENV 或镜像文件传入。
+Dockerfile/Compose 本身不提供公网 TLS，仍需 HTTPS 隧道或反向代理。
+
+停止服务：
+
+```powershell
+docker compose down
+```
+
+## 测试覆盖与验证结果
+
+```powershell
+mvn verify
+```
+
+本次 JDK 17 构建：**55 个测试全部通过**，可执行 Spring Boot JAR 已生成。
+Compose 配置校验通过，且缺少密钥时拒绝展开配置。
+本机 Docker 引擎未运行，因此本次未验证镜像构建及容器启动；
+上述 Docker 命令需在运行中的引擎上执行。
+
+| 测试 | 覆盖内容 |
+| --- | --- |
+| `SignatureVerifierTest` | RFC 4231 独立向量、中文、换行/空格/篡改、错 Secret、缺失/非法签名、并发验签 |
+| `MessageEventHandlerTest` | mock MessagingApiClient，文本 echo、四种暂不支持消息、standby、缺失消息、SDK 失败 |
+| `LifecycleEventHandlersTest` | 真实 Follow/Unfollow/Postback Handler 的 userId/eventId 日志和敏感字段不输出 |
+| `InMemoryEventDeduplicatorTest` | 并发原子抢占、成功后 TTL、精确过期边界、处理中不失效、失败释放、容量限制 |
+| `WebhookServiceTest` | 重投递、策略分发、异步、过期 Reply、异常释放、线程池拒绝 |
+| `DocumentedFlowIntegrationTest` | 真实入站 HTTP → SDK → 本地 Stub，Reply/Push 数据、重试同 Key、409、下载与日志检查 |
+
+生命周期 Handler 不依赖 MessagingApiClient，测试直接验证它们的日志副作用；
+需要调用 SDK 的 Message Handler 使用真实消息封装层并 mock SDK，不发往真实 LINE。
+完整潜在问题及覆盖状态见 [自查报告](docs/自查报告.md)。
 
 ## 文件与职责
 

@@ -1,0 +1,19 @@
+# Send only the build inputs; exclude .git, .env, work, outputs and IDE files.
+**
+!pom.xml
+!src/
+!src/**
+!docs/
+!docs/**
+# Local credential/config overrides must stay out even inside src/docs.
+**/.env
+**/.env.*
+**/application-local*
+**/application-secrets*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/*.log
