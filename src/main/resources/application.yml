@@ -1,0 +1,8 @@
+server:
+  port: 8080
+
+line:
+  bot:
+    # Empty defaults allow LineProperties to report missing values clearly.
+    channel-secret: ${LINE_CHANNEL_SECRET:}
+    channel-token: ${LINE_CHANNEL_TOKEN:}

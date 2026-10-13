@@ -1,0 +1,78 @@
+# Maven / Java build output
+target/
+*.class
+*.war
+*.ear
+*.jar
+# Keep Maven Wrapper if it is added later.
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+.mvn/analytics.properties
+dependency-reduced-pom.xml
+pom.xml.versionsBackup
+pom.xml.releaseBackup
+pom.xml.next
+release.properties
+
+# IDE settings
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.metadata/
+/bin/
+/out/
+
+# Local tools, scratch files, and generated deliverables
+/work/
+/outputs/
+/tmp/
+/temp/
+
+# Logs, process IDs, and JVM crash / heap dumps
+*.log
+logs/
+*.pid
+*.pid.lock
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# Local environment and credentials (keep shareable examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+application-local*.yml
+application-local*.yaml
+application-local*.properties
+application-secrets*.yml
+application-secrets*.yaml
+application-secrets*.properties
+/config/application*.yml
+/config/application*.yaml
+/config/application*.properties
+settings-local.xml
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
