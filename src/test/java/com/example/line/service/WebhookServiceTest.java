@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
+/** 验证异步 Webhook 的策略分发、重投递去重、Reply 年龄保护和失败释放。 */
 class WebhookServiceTest {
     private InMemoryEventDeduplicator cache() {
         return new InMemoryEventDeduplicator(Duration.ofHours(24), 100, Clock.systemUTC());
@@ -30,6 +31,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：文本正常回复，相同 ID 重投递跳过，首次出现的重投递仍处理。
     void textIsRepliedAndRedeliveryIsDeduplicated() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
@@ -44,6 +46,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：四种非文本消息都分发到兜底回复。
     void unsupportedImageStickerLocationAndFileAreReplied() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
@@ -69,6 +72,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：关注、取消关注和 Postback 各自进入注册的事件策略。
     void followUnfollowAndPostbackUseRegisteredStrategies() throws Exception {
         var follow = mock(FollowEventHandler.class);
         var unfollow = mock(UnfollowEventHandler.class);
@@ -87,6 +91,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：处理失败释放 ID，之后再次投递可以执行，成功后再次去重。
     void handlerFailureReleasesIdAndDoesNotBlockLaterEvents() throws Exception {
         var dispatcher = mock(EventDispatcher.class);
         doThrow(new IllegalStateException()).doNothing().when(dispatcher).dispatch(any());
@@ -99,6 +104,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：耗时 Handler 在工作线程中执行，不阻塞请求提交。
     void slowHandlerRunsOnWorkerAndDoesNotBlockSubmit() throws Exception {
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -127,6 +133,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：本次接收后的等待超过 15 秒时不发送 Reply。
     void queuedReplyOlderThan15SecondsIsNotSent() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
@@ -138,6 +145,7 @@ class WebhookServiceTest {
     }
 
     @Test
+    // 场景：入队被拒绝时不抢占幂等键，也不在请求线程执行业务。
     void rejectionDoesNotClaimAnIdOrProcessOnRequestThread() {
         var dedup = mock(EventDeduplicator.class);
         var dispatcher = mock(EventDispatcher.class);

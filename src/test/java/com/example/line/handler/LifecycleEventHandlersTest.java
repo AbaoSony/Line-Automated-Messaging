@@ -13,8 +13,10 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** These handlers intentionally have no SDK dependency: verify their real side effect, the log. */
+/** 验证关注、取消关注和 Postback Handler 的日志副作用与敏感字段不输出。 */
 @ExtendWith(OutputCaptureExtension.class)
 class LifecycleEventHandlersTest {
+    // 场景：关注事件记录用户和事件标识，不输出 Reply Token。
     @Test
     void followRecordsUserIdWithoutLeakingReplyToken(CapturedOutput output) throws Exception {
         var event = (FollowEvent) event("follow");
@@ -25,6 +27,7 @@ class LifecycleEventHandlersTest {
                 .doesNotContain(event.replyToken());
     }
 
+    // 场景：取消关注事件记录对应用户和事件标识。
     @Test
     void unfollowRecordsUserId(CapturedOutput output) throws Exception {
         var event = (UnfollowEvent) event("unfollow");
@@ -34,6 +37,7 @@ class LifecycleEventHandlersTest {
         assertThat(output).contains("LINE unfollow userId=" + event.source().userId(), event.webhookEventId());
     }
 
+    // 场景：Postback 保留入口追踪，但不记录动作数据或 Reply Token。
     @Test
     void postbackKeepsEntryPointAndDoesNotLogDataOrToken(CapturedOutput output) throws Exception {
         var event = (PostbackEvent) event("postback");

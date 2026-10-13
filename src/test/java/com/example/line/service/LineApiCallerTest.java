@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/** 验证 SDK 错误分类、有限指数退避、超时取消与线程中断处理。 */
 class LineApiCallerTest {
     private AbstractLineClientException httpFailure(int code, String acceptedId) {
         var error = mock(AbstractLineClientException.class);
@@ -23,6 +24,7 @@ class LineApiCallerTest {
         return new LineApiCaller(new LineSendProperties(3, Duration.ofMillis(10), Duration.ofMillis(200)), delays::add);
     }
     @Test
+    // 场景：持续 5xx 最多尝试配置次数，并按二倍间隔退避。
     void serverErrorsHaveFiniteExponentialBackoff() {
         var delays = new ArrayList<Long>();
         var calls = new AtomicInteger();
@@ -37,6 +39,7 @@ class LineApiCallerTest {
         assertThat(delays).containsExactly(200L, 400L);
     }
     @Test
+    // 场景：4xx 含 429 和普通 409 立即失败，不执行退避重试。
     void clientErrorsIncluding429AndOrdinary409AreNotRetried() {
         for (int code : List.of(400, 401, 403, 409, 429)) {
             var calls = new AtomicInteger();
@@ -51,11 +54,13 @@ class LineApiCallerTest {
         }
     }
     @Test
+    // 场景：409 带已接受请求标识时视为成功且停止重试。
     void acceptedConflictIsSuccessWithoutFurtherRetry() {
         assertThat(caller(new ArrayList<>()).execute("push", UUID.randomUUID(),
                 () -> CompletableFuture.failedFuture(httpFailure(409, "accepted-request")))).isTrue();
     }
     @Test
+    // 场景：网络故障可以重试，首次成功后不再调用 SDK。
     void networkErrorsRetryAndSuccessStopsRetrying() {
         var calls = new AtomicInteger();
         var delays = new ArrayList<Long>();
@@ -66,6 +71,7 @@ class LineApiCallerTest {
         assertThat(delays).containsExactly(200L);
     }
     @Test
+    // 场景：连续超时受次数限制，每个尚未完成的 Future 都尝试取消。
     void timeoutsAreBoundedAndCancelPendingFutures() {
         var futures = new ArrayList<CompletableFuture<?>>();
         assertThatThrownBy(() -> caller(new ArrayList<>()).execute("push", UUID.randomUUID(), () -> {
@@ -76,6 +82,7 @@ class LineApiCallerTest {
         assertThat(futures).hasSize(3).allMatch(CompletableFuture::isCancelled);
     }
     @Test
+    // 场景：退避被中断后停止重试，并恢复线程中断标记。
     void interruptionRestoresFlagWithoutRetrying() {
         var caller = new LineApiCaller(new LineSendProperties(3, Duration.ofMillis(10), Duration.ofMillis(1)),
                 millis -> { throw new InterruptedException(); });

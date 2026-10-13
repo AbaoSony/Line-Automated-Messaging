@@ -11,8 +11,10 @@ import org.springframework.core.task.TaskRejectedException;
 
 import static org.assertj.core.api.Assertions.*;
 
+/** 验证有界线程池饱和后记录拒绝日志且不会在请求线程回退执行业务。 */
 @ExtendWith(OutputCaptureExtension.class)
 class WebhookConfigTest {
+    // 场景：一个任务执行、一个任务排队后，新任务被拒绝并输出队列水位。
     @Test
     void fullBoundedPoolRejectsWithLogInsteadOfRunningOnCaller(CapturedOutput output) throws Exception {
         var executor = new WebhookConfig().webhookExecutor(

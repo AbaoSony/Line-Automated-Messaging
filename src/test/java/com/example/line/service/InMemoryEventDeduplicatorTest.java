@@ -12,8 +12,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/** 验证内存幂等的并发抢占、成功保留边界、失败释放和容量限制。 */
 class InMemoryEventDeduplicatorTest {
     @Test
+    // 场景：成功记录到期可清理，但处理中记录保持占用且满容量拒绝新事件。
     void completedEntriesExpireButInFlightEntriesRemainReserved() {
         Clock clock = mock(Clock.class);
         Instant start = Instant.parse("2026-01-01T00:00:00Z");
@@ -31,6 +33,7 @@ class InMemoryEventDeduplicatorTest {
     }
 
     @Test
+    // 场景：TTL 从完成时起算，精确到达过期边界后允许重新抢占。
     void retentionStartsOnCompletionAndExpiresAtExactBoundary() {
         Clock clock = mock(Clock.class);
         Instant start = Instant.parse("2026-01-01T00:00:00Z");
@@ -46,6 +49,7 @@ class InMemoryEventDeduplicatorTest {
     }
 
     @Test
+    // 场景：释放失败事件允许重试，不影响其他已成功事件的去重。
     void failedReservationCanBeRetriedWithoutAffectingOtherIds() {
         var cache = new InMemoryEventDeduplicator(Duration.ofHours(24), 10, Clock.systemUTC());
         assertThat(cache.tryAcquire("failed")).isTrue();
@@ -57,6 +61,7 @@ class InMemoryEventDeduplicatorTest {
     }
 
     @Test
+    // 场景：并发投递相同事件 ID 只允许一个调用取得资格。
     void concurrentDeliveryOnlyAcquiresOnce() throws Exception {
         var cache = new InMemoryEventDeduplicator(Duration.ofHours(24), 10,
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));

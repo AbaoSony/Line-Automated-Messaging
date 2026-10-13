@@ -41,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /** Executable documentation: real inbound HTTP -> worker -> SDK -> local HTTP stub. */
+/** 使用文档样例验证真实 HTTP 入站、异步分发、SDK 出站、幂等重试和敏感日志边界。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "line.bot.channel-secret=documentation-test-secret",
         "line.bot.channel-token=documentation-test-token",
@@ -57,6 +58,7 @@ class DocumentedFlowIntegrationTest {
     @Autowired private ThreadPoolTaskExecutor webhookExecutor;
     @Autowired private LineContentService contentService;
 
+    // 场景：完整验证验签、echo、事件去重、四类兜底、内容下载、Push 同 Key 重试与已接受冲突。
     @Test
     void documentedInboundAndOutboundDataMatchTheActualHttpFlow(CapturedOutput logs) throws Exception {
         byte[] text = Files.readAllBytes(EXAMPLES.resolve("webhook-text.json"));
@@ -153,6 +155,7 @@ class DocumentedFlowIntegrationTest {
                 && webhookExecutor.getThreadPoolExecutor().getQueue().isEmpty());
     }
 
+    /** 仅在测试中把真实 SDK 客户端指向本地模拟服务器，生产目标地址保持不变。 */
     @TestConfiguration(proxyBeanMethods = false)
     static class LocalLineConfig {
         @Bean(destroyMethod = "close")
@@ -173,10 +176,14 @@ class DocumentedFlowIntegrationTest {
         }
     }
 
+    /** 仅在测试内存中捕获 Reply 的 HTTP 字段，供断言而不是输出到日志。 */
     record ReplyCapture(String method, String authorization, JsonNode body) {}
+    /** 仅在测试内存中关联 Push Retry Key、鉴权字段与消息体以检查重试一致性。 */
     record PushCapture(String retryKey, String authorization, JsonNode body) {}
 
+    /** 模拟 LINE 接受、瞬时失败、幂等冲突与内容流响应，避免测试访问真实 LINE。 */
     static class LocalLineStub implements AutoCloseable {
+        // 这是流传输断言用的虚构字节，不是真实图片或 PDF，也不用于验证内容格式。
         static final byte[] CONTENT = "mock-binary-content".getBytes(StandardCharsets.UTF_8);
         final BlockingQueue<ReplyCapture> replies = new LinkedBlockingQueue<>();
         final BlockingQueue<PushCapture> pushes = new LinkedBlockingQueue<>();

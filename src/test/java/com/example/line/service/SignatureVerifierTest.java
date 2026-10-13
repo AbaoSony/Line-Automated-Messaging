@@ -14,8 +14,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** 验证独立 HMAC 向量、原始字节完整性、非法签名和并发验签。 */
 class SignatureVerifierTest {
     @Test
+    // 场景：匹配公开 RFC 4231 向量，避免只用相同实现自签自验。
     void matchesIndependentRfc4231HmacSha256Vector() {
         // RFC 4231 case 2 is a public test vector, not a channel credential.
         var verifier = verifier("Jefe");
@@ -25,6 +27,7 @@ class SignatureVerifierTest {
     }
 
     @Test
+    // 场景：中文、空格和换行必须逐字节一致，篡改或使用另一密钥时拒绝。
     void unicodeBodyMustMatchByteForByteIncludingWhitespaceAndNewlines() throws Exception {
         var verifier = verifier("test-secret");
         byte[] body = bytes("{ \"events\": [], \"text\": \"你好\\n世界\" }\n");
@@ -39,6 +42,7 @@ class SignatureVerifierTest {
     }
 
     @Test
+    // 场景：缺失、空白、非法 Base64 或错误长度摘要均返回无效。
     void missingMalformedOrWrongLengthSignaturesAreRejected() {
         for (String signature : new String[] {null, "", " ", "not-base64!", "AA==", "AAAA"}) {
             assertThat(verifier("test-secret").isValid(bytes("{}"), signature)).isFalse();
@@ -46,6 +50,7 @@ class SignatureVerifierTest {
     }
 
     @Test
+    // 场景：并发验签各自使用独立 Mac 状态，互不污染。
     void concurrentVerificationDoesNotShareMutableMacState() throws Exception {
         var verifier = verifier("test-secret");
         var executor = Executors.newFixedThreadPool(8);

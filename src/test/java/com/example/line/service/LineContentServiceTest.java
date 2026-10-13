@@ -14,8 +14,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+/** 验证按 messageId 流式下载、字节上限和上游资源关闭。 */
 class LineContentServiceTest {
     @Test
+    // 场景：按指定消息 ID 下载正确字节，并关闭上游输入流。
     void downloadsByMessageIdAndClosesUpstream() throws Exception {
         var client = mock(MessagingApiBlobClient.class);
         var content = mock(BlobContent.class);
@@ -31,6 +33,7 @@ class LineContentServiceTest {
     }
 
     @Test
+    // 场景：内容超出配置上限时失败，仍关闭上游流。
     void oversizedContentFailsAndClosesUpstream() throws Exception {
         var client = mock(MessagingApiBlobClient.class);
         var content = mock(BlobContent.class);

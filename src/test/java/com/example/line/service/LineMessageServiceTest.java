@@ -18,8 +18,10 @@ import static org.assertj.core.api.Assertions.*;
 
 import static org.mockito.Mockito.*;
 
+/** 验证 Reply/Push 请求构造、单次消息限制和 Push 重试幂等。 */
 class LineMessageServiceTest {
     @Test
+    // 场景：文本 Reply 传递当前 Token 和原始文本。
     void sendsSdkTextReplyWithOriginalToken() throws Exception {
         var client = mock(MessagingApiClient.class);
         when(client.replyMessage(any())).thenReturn(CompletableFuture.completedFuture(null));
@@ -36,6 +38,7 @@ class LineMessageServiceTest {
     }
 
     @Test
+    // 场景：自动重试复用 Key 和消息体，新的服务调用生成不同 Key。
     void pushRetriesReuseKeyAndPayloadWhileNewCallsUseNewKeys() {
         var client = mock(MessagingApiClient.class);
         when(client.pushMessage(any(), any()))
@@ -53,6 +56,7 @@ class LineMessageServiceTest {
     }
 
     @Test
+    // 场景：Reply 不重试，非法消息批次与用户 ID 在 SDK 调用前失败。
     void replyDoesNotRetryAndValidationPreventsInvalidBatches() {
         var client = mock(MessagingApiClient.class);
         when(client.replyMessage(any())).thenReturn(CompletableFuture.failedFuture(new IOException()));
@@ -70,6 +74,7 @@ class LineMessageServiceTest {
     }
 
     @Test
+    // 场景：合法的五条根消息能够通过封装层并提交 SDK。
     void fiveMessagesAreAccepted() {
         var client = mock(MessagingApiClient.class);
         when(client.pushMessage(any(), any())).thenReturn(CompletableFuture.completedFuture(null));

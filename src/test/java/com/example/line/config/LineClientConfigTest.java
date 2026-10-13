@@ -8,10 +8,12 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** 验证 LINE 客户端装配、必填配置快速失败以及报错不泄露凭证。 */
 class LineClientConfigTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(LineClientConfig.class);
 
+    // 场景：两项凭证齐全时能够创建唯一的消息客户端 Bean。
     @Test
     void createsClientWhenConfigured() {
         runner.withPropertyValues("line.bot.channel-secret=test-secret", "line.bot.channel-token=test-token")
@@ -21,6 +23,7 @@ class LineClientConfigTest {
                 });
     }
 
+    // 场景：内部 Push 启用但缺少独立鉴权值时启动失败。
     @Test
     void enabledInternalPushRequiresSeparateToken() {
         runner.withPropertyValues("line.bot.channel-secret=test-secret", "line.bot.channel-token=test-token",
@@ -29,6 +32,7 @@ class LineClientConfigTest {
                         "Set LINE_INTERNAL_PUSH_TOKEN when LINE_INTERNAL_PUSH_ENABLED=true"));
     }
 
+    // 场景：两项 LINE 凭证均缺失时一次列出缺失配置名。
     @Test
     void reportsBothMissingProperties() {
         runner.run(context -> assertThat(context.getStartupFailure())
@@ -36,6 +40,7 @@ class LineClientConfigTest {
                         + "line.bot.channel-token (LINE_CHANNEL_TOKEN). Set non-blank environment variables or configuration properties."));
     }
 
+    // 场景：Secret 为空白时拒绝启动，错误信息不包含已配置的 Access Token。
     @Test
     void rejectsBlankSecretWithoutDisclosingToken() {
         runner.withPropertyValues("line.bot.channel-secret=   ", "line.bot.channel-token=private-test-token")
@@ -47,6 +52,7 @@ class LineClientConfigTest {
                 });
     }
 
+    // 场景：Access Token 为空白时拒绝启动，错误信息不包含已配置的 Secret。
     @Test
     void rejectsBlankTokenWithoutDisclosingSecret() {
         runner.withPropertyValues("line.bot.channel-secret=private-test-secret", "line.bot.channel-token=   ")

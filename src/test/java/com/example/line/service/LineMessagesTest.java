@@ -10,8 +10,10 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
+/** 验证五类消息工厂的文档 JSON 一致性和本地参数约束。 */
 class LineMessagesTest {
     @Test
+    // 场景：文本、贴图、图片、Flex 和 Quick Reply 序列化结果与文档样例一致。
     void allFactoriesSerializeToDocumentedFiveMessagePayload() throws Exception {
         List<Message> messages = List.of(
                 LineMessages.text("hello"),
@@ -25,6 +27,7 @@ class LineMessagesTest {
         assertThat(actual).isEqualTo(expected);
     }
     @Test
+    // 场景：空白或超长文本、非 HTTPS 图片及过多快捷选项在本地失败。
     void invalidTextImagesAndQuickOptionsFailLocally() {
         assertThatThrownBy(() -> LineMessages.text("")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> LineMessages.text("x".repeat(5001))).isInstanceOf(IllegalArgumentException.class);
