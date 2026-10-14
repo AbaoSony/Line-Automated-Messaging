@@ -1,6 +1,6 @@
 package com.example.line;
 
-import com.example.line.service.LineContentService;
+import com.example.line.content.LineContentService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.bot.messaging.client.MessagingApiBlobClient;

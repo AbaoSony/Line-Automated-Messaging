@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
  * Spring Boot 应用入口，启动 HTTP 接入、LINE 客户端配置和异步事件处理组件。
- * 通过包扫描装配 config/controller/handler/service，各层职责由对应组件承担。
+ * 通过包扫描装配 client、webhook、messaging、content 与 common，各功能职责由对应组件承担。
  */
 @SpringBootApplication
 public class LineMessagingApplication {

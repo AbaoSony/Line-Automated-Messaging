@@ -193,11 +193,11 @@ Compose 配置校验通过，且缺少密钥时拒绝展开配置。
 - `pom.xml`：Web、LINE Messaging API 客户端及测试依赖，JDK 17 编译配置。
 - `src/main/resources/application.yml`：端口 8080、凭证环境变量映射。
 - `src/main/java/com/example/line/LineMessagingApplication.java`：启动入口。
-- `src/main/java/com/example/line/config/LineProperties.java`：配置绑定与快速失败校验。
-- `src/main/java/com/example/line/config/LineClientConfig.java`：创建 `MessagingApiClient` Bean。
-- `src/main/java/com/example/line/controller/HealthController.java`：健康接口。
-- `src/test/java/com/example/line/config/LineClientConfigTest.java`：配置校验和客户端装配测试。
-- `src/test/java/com/example/line/HealthIntegrationTest.java`：真实 HTTP 健康接口测试。
+- `src/main/java/com/example/line/client/LineProperties.java`：配置绑定与快速失败校验。
+- `src/main/java/com/example/line/client/LineClientConfig.java`：创建 `MessagingApiClient` Bean。
+- `src/main/java/com/example/line/common/web/HealthController.java`：健康接口。
+- `src/test/java/com/example/line/client/LineClientConfigTest.java`：配置校验和客户端装配测试。
+- `src/test/java/com/example/line/common/web/HealthIntegrationTest.java`：真实 HTTP 健康接口测试。
 - `.gitignore`：忽略构建、临时工具及本地凭证文件。
 
 已实现 Webhook、文本 Reply Echo、Push、消息构造、事件分发与内容下载示例。
@@ -303,18 +303,22 @@ try (OutputStream output = Files.newOutputStream(destination, StandardOpenOption
 
 - `pom.xml`：新增 `line-bot-webhook`、显式声明 `line-bot-jackson`，版本保持 10.2.0。
 - `src/main/resources/application.yml`：线程池、缓存、下载限制。
-- `src/main/java/com/example/line/config/LineClientConfig.java`：新增 Blob 客户端。
-- 同目录 `WebhookConfig.java`、`WebhookProperties.java`：有界线程池和配置。
-- `src/main/java/com/example/line/controller/WebhookController.java`：验签与快速确认。
-- `src/main/java/com/example/line/handler/`：`EventHandler.java`、`MessageEventHandler.java`、
-  `FollowEventHandler.java`、`UnfollowEventHandler.java`、`PostbackEventHandler.java`。
-- `src/main/java/com/example/line/service/`：`SignatureVerifier.java`、`WebhookService.java`、
-  `EventDispatcher.java`、`EventDeduplicator.java`、`InMemoryEventDeduplicator.java`、
-  `LineMessageService.java`、`LineContentService.java`。
-- `src/test/java/com/example/line/controller/WebhookControllerTest.java`：MockMvc 正确/错误/缺失/非法签名。
-- `src/test/java/com/example/line/config/WebhookConfigTest.java`：真实有界线程池饱和拒绝及日志。
-- `src/test/java/com/example/line/service/`：`WebhookServiceTest.java`、
-  `InMemoryEventDeduplicatorTest.java`、`LineContentServiceTest.java`、`LineMessageServiceTest.java`。
+- `src/main/java/com/example/line/client/LineClientConfig.java`：新增 Blob 客户端。
+- `src/main/java/com/example/line/webhook/`：`WebhookConfig.java`、`WebhookProperties.java`，有界线程池和配置。
+- `src/main/java/com/example/line/webhook/WebhookController.java`：验签与快速确认。
+- `src/main/java/com/example/line/webhook/handler/`：`EventHandler.java`、`MessageEventHandler.java`、
+  `FollowEventHandler.java`、`UnfollowEventHandler.java`、`PostbackEventHandler.java`、`EventDispatcher.java`。
+- `src/main/java/com/example/line/webhook/WebhookService.java`：异步处理与事件生命周期。
+- `src/main/java/com/example/line/webhook/signature/SignatureVerifier.java`：原始请求体验签。
+- `src/main/java/com/example/line/webhook/dedup/`：`EventDeduplicator.java`、`InMemoryEventDeduplicator.java`。
+- `src/main/java/com/example/line/messaging/LineMessageService.java`：消息发送封装。
+- `src/main/java/com/example/line/content/LineContentService.java`：内容下载。
+- `src/test/java/com/example/line/webhook/WebhookControllerTest.java`：MockMvc 正确/错误/缺失/非法签名。
+- `src/test/java/com/example/line/webhook/WebhookConfigTest.java`：真实有界线程池饱和拒绝及日志。
+- `src/test/java/com/example/line/webhook/WebhookServiceTest.java`：异步处理和事件分发测试。
+- `src/test/java/com/example/line/webhook/dedup/InMemoryEventDeduplicatorTest.java`：幂等测试。
+- `src/test/java/com/example/line/content/LineContentServiceTest.java`：内容下载测试。
+- `src/test/java/com/example/line/messaging/LineMessageServiceTest.java`：消息发送测试。
 - `scripts/Send-TestWebhook.ps1`、`scripts/webhook-sample.json`：curl 签名测试方法。
 - `README.md`：运行、验证、扩展机制、下载示例和交付语义。
 
