@@ -1,5 +1,9 @@
 # LINE Messaging API 接入服务
 
+P0 当前状态：步骤 1 已实现。启动前还需通过运行环境提供数据库连接变量；自动测试需要运行中的 Docker Engine。
+最新配置与契约以 [接口文档](docs/接口文档.md) 为准；另见 [数据库设计](docs/数据库设计.md)、
+[日志规范与实施状态](docs/日志规范.md)、[P0 持久化验证步骤](docs/examples/webhook/README.md)。
+
 JDK 17、Maven 3.6.3+、Spring Boot 3.5.16、LINE SDK 10.2.0。
 
 接口契约、完整收发 JSON、模拟联调与真实 LINE 对接步骤见 [接口文档](docs/接口文档.md)。
@@ -124,7 +128,8 @@ Docker Compose 将端口映射到宿主机 127.0.0.1:8080，宿主机上的隧�
 ## Docker 与 Docker Compose
 
 需要运行中的 Docker Engine；Windows Docker Desktop 使用 Linux containers。
-Dockerfile 多阶段构建：JDK 17 + Maven 执行 `verify`（包含测试），运行层只放 JRE 17 和 JAR，
+构建镜像前先在可访问 Docker Engine 的宿主机执行 `mvn clean test`，其中 Testcontainers 运行临时 PostgreSQL。
+Dockerfile 多阶段构建：JDK 17 + Maven 打包并编译测试，不在构建容器内执行嵌套容器测试；运行层只放 JRE 17 和 JAR，
 以 UID/GID 10001 非 root 用户运行。由于测试读取文档模拟 JSON，构建阶段会复制 `docs/`。
 
 Compose 从当前进程环境或仓库根目录 `.env` 注入密钥。首次可执行：

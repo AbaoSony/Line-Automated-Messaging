@@ -1,5 +1,6 @@
 package com.example.line.common.web;
 
+import com.example.line.common.persistence.PostgresIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "line.bot.channel-secret=test-secret", "line.bot.channel-token=test-token"
 })
-class HealthIntegrationTest {
+class HealthIntegrationTest extends PostgresIntegrationSupport {
     @Autowired
     private TestRestTemplate restTemplate;
 

@@ -2,10 +2,38 @@ server:
   port: 8080
 
 logging:
+  structured:
+    format:
+      console: logstash
   level:
     com.linecorp.bot.client.wire: OFF
+    com.zaxxer.hikari.HikariConfig: OFF
+    org.springframework.jdbc.core: INFO
+    org.flywaydb.core.FlywayExecutor: WARN
+
+spring:
+  main:
+    banner-mode: off
+  flyway:
+    locations: classpath:db/migration
 
 line:
+  database:
+    url: ${DATABASE_URL:}
+    username: ${DATABASE_USERNAME:}
+    password: ${DATABASE_PASSWORD:}
+    pool-size: ${DATABASE_POOL_SIZE:8}
+    connection-timeout-ms: ${DATABASE_CONNECTION_TIMEOUT_MS:3000}
+  persistence:
+    workers: 2
+    queue-capacity: 512
+    shutdown-timeout: 30s
+    cleanup-batch-size: 500
+  chat:
+    cleanup-enabled: ${CHAT_CLEANUP_ENABLED:false}
+    retention-days: ${CHAT_RETENTION_DAYS:90}
+    cleanup-interval: ${CHAT_CLEANUP_INTERVAL:1h}
+    history-max-limit: 100
   bot:
     # Empty defaults allow LineProperties to report missing values clearly.
     channel-secret: ${LINE_CHANNEL_SECRET:}

@@ -12,6 +12,11 @@ services:
       LINE_CHANNEL_TOKEN: ${LINE_CHANNEL_TOKEN:?Set LINE_CHANNEL_TOKEN in environment or .env}
       LINE_INTERNAL_PUSH_ENABLED: ${LINE_INTERNAL_PUSH_ENABLED:-false}
       LINE_INTERNAL_PUSH_TOKEN: ${LINE_INTERNAL_PUSH_TOKEN:-}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in environment or .env}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:?Set DATABASE_USERNAME in environment or .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in environment or .env}
+      CHAT_CLEANUP_ENABLED: ${CHAT_CLEANUP_ENABLED:-false}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-90}
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m

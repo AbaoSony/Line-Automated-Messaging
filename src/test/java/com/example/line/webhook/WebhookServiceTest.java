@@ -38,7 +38,7 @@ class WebhookServiceTest {
     void textIsRepliedAndRedeliveryIsDeduplicated() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
         String text = """
                 "type":"message","replyToken":"reply","message":{"type":"text","id":"123","text":"你好"}
                 """;
@@ -53,7 +53,7 @@ class WebhookServiceTest {
     void unsupportedImageStickerLocationAndFileAreReplied() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
         List<String> contents = List.of(
                 """
                 {"type":"image","id":"1","contentProvider":{"type":"line"}}
@@ -140,7 +140,7 @@ class WebhookServiceTest {
     void queuedReplyOlderThan15SecondsIsNotSent() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
         service.process(payload("stale", false,
                 "\"type\":\"message\",\"replyToken\":\"reply\",\"message\":{\"type\":\"text\",\"id\":\"1\",\"text\":\"hello\"}"),
                 System.nanoTime() - TimeUnit.SECONDS.toNanos(16));

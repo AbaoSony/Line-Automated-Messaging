@@ -1,6 +1,8 @@
 package com.example.line;
 
 import com.example.line.content.LineContentService;
+import com.example.line.common.persistence.PostgresIntegrationSupport;
+import com.example.line.chat.ChatHistoryService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.bot.messaging.client.MessagingApiBlobClient;
@@ -50,13 +52,15 @@ import static org.awaitility.Awaitility.await;
 })
 @Import(DocumentedFlowIntegrationTest.LocalLineConfig.class)
 @ExtendWith(OutputCaptureExtension.class)
-class DocumentedFlowIntegrationTest {
+class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     private static final Path EXAMPLES = Path.of("docs", "examples");
     private final ObjectMapper mapper = new ObjectMapper();
     @Autowired private TestRestTemplate http;
     @Autowired private LocalLineStub stub;
     @Autowired private ThreadPoolTaskExecutor webhookExecutor;
     @Autowired private LineContentService contentService;
+    @Autowired private ChatHistoryService chatHistory;
+    @Autowired private ThreadPoolTaskExecutor persistenceExecutor;
 
     // 场景：完整验证验签、echo、事件去重、四类兜底、内容下载、Push 同 Key 重试与已接受冲突。
     @Test
@@ -71,11 +75,30 @@ class DocumentedFlowIntegrationTest {
         assertThat(capture.method()).isEqualTo("POST");
         assertThat(capture.authorization()).isEqualTo("Bearer documentation-test-token");
         assertThat(capture.body()).isEqualTo(readJson("reply-text-request.json"));
+        awaitWorkers();
+        awaitPersistence();
+        JsonNode textEvent = mapper.readTree(text).path("events").get(0);
+        String userId = textEvent.path("source").path("userId").asText();
+        var history = chatHistory.findRecent(userId, 100);
+        assertThat(history).filteredOn(row -> "INBOUND".equals(row.direction())
+                && textEvent.path("message").path("id").asText().equals(row.lineMessageId()))
+                .singleElement().satisfies(row -> {
+                    assertThat(row.userId()).isEqualTo(userId);
+                    assertThat(row.content().path("text").asText()).isEqualTo(textEvent.path("message").path("text").asText());
+                    assertThat(row.content().has("quoteToken")).isFalse();
+                });
+        assertThat(history).anySatisfy(row -> {
+            assertThat(row.direction()).isEqualTo("OUTBOUND");
+            assertThat(row.content().path("text").asText()).isEqualTo(textEvent.path("message").path("text").asText());
+        });
 
         assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook-redelivery.json")), true)
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         awaitWorkers();
+        awaitPersistence();
         assertThat(stub.replies).isEmpty();
+        assertThat(chatHistory.findRecent(userId, 100)).filteredOn(row -> "INBOUND".equals(row.direction())
+                && textEvent.path("message").path("id").asText().equals(row.lineMessageId())).hasSize(1);
 
         for (String name : List.of("image", "sticker", "location", "file")) {
             byte[] body = Files.readAllBytes(EXAMPLES.resolve("webhook-" + name + ".json"));
@@ -153,6 +176,11 @@ class DocumentedFlowIntegrationTest {
     private void awaitWorkers() {
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookExecutor.getActiveCount() == 0
                 && webhookExecutor.getThreadPoolExecutor().getQueue().isEmpty());
+    }
+
+    private void awaitPersistence() {
+        await().atMost(Duration.ofSeconds(5)).until(() -> persistenceExecutor.getActiveCount() == 0
+                && persistenceExecutor.getThreadPoolExecutor().getQueue().isEmpty());
     }
 
     /** 仅在测试中把真实 SDK 客户端指向本地模拟服务器，生产目标地址保持不变。 */

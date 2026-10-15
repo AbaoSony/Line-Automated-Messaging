@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 class MessageEventHandlerTest {
     private final MessagingApiClient client = mock(MessagingApiClient.class);
     private final MessageEventHandler handler = new MessageEventHandler(new LineMessageService(client,
-            new LineApiCaller(new LineSendProperties(3, Duration.ofSeconds(1), Duration.ofMillis(1)))));
+            new LineApiCaller(new LineSendProperties(3, Duration.ofSeconds(1), Duration.ofMillis(1)))), mock(com.example.line.chat.ChatMessageService.class));
 
     // 场景：中文文本与 hello 都使用当前事件的 Reply Token 原样回显。
     @ParameterizedTest

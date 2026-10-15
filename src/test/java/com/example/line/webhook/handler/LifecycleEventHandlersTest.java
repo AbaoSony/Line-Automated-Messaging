@@ -20,7 +20,7 @@ class LifecycleEventHandlersTest {
     @Test
     void followRecordsUserIdWithoutLeakingReplyToken(CapturedOutput output) throws Exception {
         var event = (FollowEvent) event("follow");
-        var handler = new FollowEventHandler();
+        var handler = new FollowEventHandler(org.mockito.Mockito.mock(com.example.line.user.UserService.class));
         assertThat(handler.eventType()).isEqualTo(FollowEvent.class);
         handler.handle(event);
         assertThat(output).contains("LINE follow userId=" + event.source().userId(), event.webhookEventId())
@@ -31,7 +31,7 @@ class LifecycleEventHandlersTest {
     @Test
     void unfollowRecordsUserId(CapturedOutput output) throws Exception {
         var event = (UnfollowEvent) event("unfollow");
-        var handler = new UnfollowEventHandler();
+        var handler = new UnfollowEventHandler(org.mockito.Mockito.mock(com.example.line.user.UserService.class));
         assertThat(handler.eventType()).isEqualTo(UnfollowEvent.class);
         handler.handle(event);
         assertThat(output).contains("LINE unfollow userId=" + event.source().userId(), event.webhookEventId());

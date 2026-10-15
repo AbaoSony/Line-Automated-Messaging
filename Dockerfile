@@ -3,9 +3,9 @@ FROM maven:3.9.11-eclipse-temurin-17 AS build
 WORKDIR /workspace
 COPY pom.xml ./
 COPY src ./src
-# Integration tests read the documented JSON fixtures.
+# 在可访问 Docker Engine 的宿主机先执行 mvn clean test；镜像构建内不运行嵌套容器测试。
 COPY docs ./docs
-RUN mvn -B -ntp verify
+RUN mvn -B -ntp -DskipTests package
 
 FROM eclipse-temurin:17-jre-jammy AS runtime
 RUN groupadd --gid 10001 line \
