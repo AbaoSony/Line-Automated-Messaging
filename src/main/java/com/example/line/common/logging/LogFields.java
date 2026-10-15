@@ -19,10 +19,12 @@ final class LogFields {
     private static final Set<String> ALLOWED = Set.of("webhook_event_id", "user_id", "outcome", "duration_ms",
             "http_status", "error_type", "message_type", "model", "input_tokens", "output_tokens", "operation",
             "attempt", "retry", "active", "queued", "shutdown", "message_id", "text_length", "content",
-            "messages", "is_redelivery", "reason", "stack_trace");
+            "messages", "is_redelivery", "reason", "stack_trace", "operator", "source_ip", "target_user_id",
+            "correlation_id", "reply_kind", "stage");
     private final LoggingProperties properties;
     private static final Set<String> CONFIGURATION_NAMES = Set.of("LINE_CHANNEL_SECRET", "LINE_CHANNEL_TOKEN",
             "LINE_INTERNAL_PUSH_TOKEN", "DATABASE_URL", "DATABASE_USERNAME", "DATABASE_PASSWORD",
+            "OPENAI_API_KEY", "REDIS_HOST", "AI_NAMESPACE", "line.ai.model", "line.ai.credentials", "line.ai.redis", "line.ai.memory",
             "line.logging.service", "line.logging.env", "line.logging.version", "line.logging.instance", "line.logging.readable-file");
 
     LogFields(Environment environment) {
@@ -35,10 +37,7 @@ final class LogFields {
         var result = new LinkedHashMap<String, Object>();
         result.put("ts", event.getInstant().toString());
         result.put("level", event.getLevel().toString());
-        result.put("service", properties.service());
-        result.put("env", properties.env());
-        result.put("version", properties.version());
-        result.put("instance", properties.instance());
+        identify(result);
         Object traceId = supplied.get("trace_id");
         result.put("trace_id", traceId == null ? LogContext.BACKGROUND_TRACE_ID : traceId);
         Object name = supplied.get("event");
@@ -79,6 +78,13 @@ final class LogFields {
             if (!application) result.put("message", "Configuration validation failed; check named environment variables or properties");
         }
         return result;
+    }
+
+    void identify(Map<String, Object> fields) {
+        fields.put("service", properties.service());
+        fields.put("env", properties.env());
+        fields.put("version", properties.version());
+        fields.put("instance", properties.instance());
     }
 
     private static void collectConfigurationNames(String text, Set<String> names) {

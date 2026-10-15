@@ -18,15 +18,28 @@ public class AsyncPersistence {
     private static final Logger log = LoggerFactory.getLogger(AsyncPersistence.class);
     private final Executor executor;
     private final MeterRegistry meters;
+    private final com.example.line.common.execution.UserWorkTracker tracker;
 
     /**
      * 注入有界持久化执行器与指标表。
      * @param executor 专用落库线程池
      * @param meters 失败计数注册表
      */
-    public AsyncPersistence(@Qualifier("persistenceExecutor") Executor executor, MeterRegistry meters) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public AsyncPersistence(@Qualifier("persistenceExecutor") Executor executor, MeterRegistry meters,
+                            com.example.line.common.execution.UserWorkTracker tracker) {
         this.executor = executor;
         this.meters = meters;
+        this.tracker = tracker;
+    }
+
+    /**
+     * 为独立执行器测试提供隔离的工作跟踪器。
+     * @param executor 测试执行器
+     * @param meters 测试指标表
+     */
+    public AsyncPersistence(Executor executor, MeterRegistry meters) {
+        this(executor, meters, new com.example.line.common.execution.UserWorkTracker());
     }
 
     /**
@@ -36,15 +49,23 @@ public class AsyncPersistence {
      * @param action 不包含 Token 或原始 Webhook 的落库操作
      */
     public void submit(String operation, String userId, Runnable action) {
+        var lease = tracker.register(userId);
+        if (lease == null) {
+            meters.counter("persistence.rejected").increment();
+            BusinessLog.write(log, Level.WARN, LogEvents.EXECUTOR_REJECTED, "User persistence blocked by deletion",
+                    BusinessLog.fields("operation", operation, "outcome", "SKIPPED", "reason", "deletion_barrier"));
+            return;
+        }
         try {
             executor.execute(() -> {
-                try (var scope = LogContext.user(userId)) {
+                try (lease; var scope = LogContext.user(userId)) {
                     action.run();
                 } catch (RuntimeException failure) {
                     failed(operation, userId, failure);
                 }
             });
         } catch (RejectedExecutionException failure) {
+            lease.close();
             meters.counter("persistence.rejected").increment();
             try (var scope = LogContext.user(userId)) {
                 BusinessLog.failure(log, Level.WARN, LogEvents.EXECUTOR_REJECTED, "Persistence task rejected", failure,

@@ -32,6 +32,9 @@ public class WebhookService {
     private final Executor executor;
     private final EventDispatcher dispatcher;
     private final EventDeduplicator deduplicator;
+    private final com.example.line.common.execution.UserWorkTracker tracker;
+    private final java.time.Duration totalTimeout;
+    private final java.util.concurrent.atomic.AtomicLong receiptSequence=new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 注入异步执行和事件生命周期依赖。
@@ -39,12 +42,28 @@ public class WebhookService {
      * @param executor WebhookConfig 提供的有界执行器，不应替换为请求线程直接执行的实现
      * @param dispatcher 按具体事件 Class 调用 Handler 的分发器
      * @param deduplicator 以 webhookEventId 原子抢占、成功保留和失败释放的接口
+     * @param tracker 用户删除屏障
+     * @param properties 与 AI 一致的入口截止预算
      */
-    public WebhookService(@Qualifier("webhookExecutor") Executor executor,
-            EventDispatcher dispatcher, EventDeduplicator deduplicator) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public WebhookService(@Qualifier("webhookAdmissionExecutor") Executor executor,
+            EventDispatcher dispatcher, EventDeduplicator deduplicator,com.example.line.common.execution.UserWorkTracker tracker,com.example.line.ai.AiProperties properties) {
         this.executor = executor;
         this.dispatcher = dispatcher;
         this.deduplicator = deduplicator;
+        this.tracker=tracker;
+        this.totalTimeout=properties.totalTimeout();
+    }
+
+    /**
+     * 为无容器的接入单元测试创建隔离跟踪器。
+     * @param executor 测试有序执行器
+     * @param dispatcher 测试策略分发
+     * @param deduplicator 测试去重
+     */
+    public WebhookService(Executor executor,EventDispatcher dispatcher,EventDeduplicator deduplicator){
+        this.executor=executor;this.dispatcher=dispatcher;this.deduplicator=deduplicator;
+        this.tracker=new com.example.line.common.execution.UserWorkTracker();this.totalTimeout=java.time.Duration.ofSeconds(15);
     }
 
     /**
@@ -53,8 +72,10 @@ public class WebhookService {
      *
      * @param body 非 null 的已验签原始字节；调用方提交后不得再修改该数组
      */
-    public void submit(byte[] body) {
-        long receivedNanos = System.nanoTime();
+    public synchronized void submit(byte[] body) {
+        String captured=org.slf4j.MDC.get("received_nanos");
+        long receivedNanos=captured==null?System.nanoTime():Long.parseLong(captured);
+        org.slf4j.MDC.put("accepted_at",java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString());
         try {
             executor.execute(() -> process(body, receivedNanos));
         } catch (RejectedExecutionException e) {
@@ -86,6 +107,7 @@ public class WebhookService {
             return;
         }
         for (Event event : request.events()) {
+            org.slf4j.MDC.put("received_sequence",Long.toString(receiptSequence.incrementAndGet()));
             try (var scope = LogContext.event(event == null ? null : event.webhookEventId(),
                     event == null || event.source() == null ? null : event.source().userId())) {
                 processEvent(event, receivedNanos);
@@ -103,9 +125,9 @@ public class WebhookService {
         // Do not retain a short-lived replyToken behind slow/busy workers.
         // Measure from this HTTP delivery, not LINE timestamp (redeliveries retain it).
         // 15 秒是本项目保守的排队预算，不是 LINE 的官方有效期承诺；同批前置业务耗时也计入。
-        if (event instanceof MessageEvent && System.nanoTime() - receivedNanos > TimeUnit.SECONDS.toNanos(15)) {
+        if (event instanceof MessageEvent && System.nanoTime() - receivedNanos > totalTimeout.toNanos()) {
             BusinessLog.write(log, Level.WARN, LogEvents.WEBHOOK_EVENT_SKIPPED,
-                    "Skipping stale queued reply; receipt age exceeds 15 seconds",
+                    "Skipping stale queued reply; receipt age exceeds configured budget",
                     BusinessLog.fields("outcome", "SKIPPED", "reason", "stale_reply"));
             return;
         }
@@ -122,9 +144,21 @@ public class WebhookService {
             acquired = true;
             BusinessLog.write(log, Level.INFO, LogEvents.WEBHOOK_RECEIVED, "Processing LINE event",
                     BusinessLog.fields("message_type", event.getClass().getSimpleName(), "is_redelivery", redelivery));
-            dispatcher.dispatch(event);
-            // Handler 全部成功后才开始保留期，失败任务不能抢先写成“已处理”。
-            deduplicator.complete(id);
+            var lease=tracker.register(event.source()==null?null:event.source().userId());
+            if(lease==null){deduplicator.complete(id);return;}
+            try {
+                var decorator=new com.example.line.common.logging.MdcTaskDecorator();
+                var error=new java.util.concurrent.atomic.AtomicReference<Throwable>();
+                Runnable completed=decorator.decorate(() -> {
+                    try(lease) {
+                        Throwable failure=error.get();
+                        if(failure==null)deduplicator.complete(id);
+                        else {deduplicator.release(id);BusinessLog.failure(log,Level.ERROR,LogEvents.WEBHOOK_EVENT_FAILED,
+                                "Async LINE event failed",failure,BusinessLog.fields("outcome","FAILED"));}
+                    }
+                });
+                dispatcher.dispatchAsync(event).whenComplete((ignored,failure) -> {error.set(failure);completed.run();});
+            } catch(Exception failure){lease.close();throw failure;}
         } catch (Exception e) {
             // 只释放自己取得的占用；缓存满等抢占前失败不能删除其他任务的记录。
             if (acquired) {

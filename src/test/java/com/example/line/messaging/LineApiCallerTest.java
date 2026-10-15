@@ -14,6 +14,15 @@ import static org.mockito.Mockito.*;
 
 /** 验证 SDK 错误分类、有限指数退避、超时取消与线程中断处理。 */
 class LineApiCallerTest {
+    @Test void sharedDeadlineIsRecheckedAfterStartingSdkRequest() {
+        var clock=new java.util.concurrent.atomic.AtomicLong(0);
+        var deadline=com.example.line.common.execution.Deadline.from(0,Duration.ofMillis(5),clock::get);
+        var pending=new CompletableFuture<>();
+        assertThatThrownBy(() -> caller(new ArrayList<>()).execute("reply",null,() -> {
+            clock.set(Duration.ofMillis(6).toNanos());return pending;
+        },deadline)).isInstanceOf(LineSendException.class);
+        assertThat(pending.isCancelled()).isTrue();
+    }
     private AbstractLineClientException httpFailure(int code, String acceptedId) {
         var error = mock(AbstractLineClientException.class);
         when(error.getCode()).thenReturn(code);

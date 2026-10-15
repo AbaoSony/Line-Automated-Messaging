@@ -58,9 +58,14 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private TestRestTemplate http;
     @Autowired private LocalLineStub stub;
     @Autowired private ThreadPoolTaskExecutor webhookExecutor;
+    @Autowired private ThreadPoolTaskExecutor webhookAdmissionExecutor;
+    @Autowired private com.example.line.ai.coordination.SessionScheduler aiScheduler;
     @Autowired private LineContentService contentService;
     @Autowired private ChatHistoryService chatHistory;
     @Autowired private ThreadPoolTaskExecutor persistenceExecutor;
+    @Autowired private com.example.line.common.logging.EventRecorder eventRecorder;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
 
     // 场景：完整验证验签、echo、事件去重、四类兜底、内容下载、Push 同 Key 重试与已接受冲突。
     @Test
@@ -97,6 +102,19 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(row.direction()).isEqualTo("OUTBOUND");
             assertThat(row.content().path("text").asText()).isEqualTo(textEvent.path("message").path("text").asText());
         });
+        var aiExample=readJson("reply/ai-result.json");
+        var aiRow=jdbc.queryForMap("SELECT * FROM chat_message WHERE user_id=? AND in_reply_to_message_id=? AND direction='OUTBOUND'",
+                userId,textEvent.path("message").path("id").asText());
+        for(String field:List.of("model_name","reply_kind","source_type","conversation_id","in_reply_to_message_id","correlation_id"))
+            assertThat(aiRow.get(field)).isEqualTo(aiExample.path(field).asText());
+        for(String field:List.of("input_tokens","output_tokens","latency_ms"))
+            assertThat(((Number)aiRow.get(field)).longValue()).isEqualTo(aiExample.path(field).asLong());
+        assertThat(mapper.readTree(aiRow.get("content").toString()).path("text")).isEqualTo(aiExample.path("text"));
+        var modelRequest=org.mockito.ArgumentCaptor.forClass(com.example.line.ai.generation.ChatRequest.class);
+        org.mockito.Mockito.verify(testModel).generate(modelRequest.capture());
+        assertThat(modelRequest.getValue().userMessage()).isEqualTo(textEvent.path("message").path("text").asText());
+        assertThat(modelRequest.getValue().systemPrompt()).contains("小晴").doesNotContain("{{current_time}}","{{last_chat_gap}}",modelRequest.getValue().userMessage());
+        assertThat(modelRequest.getValue().history()).isEmpty();
 
         assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-redelivery.json")), true)
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -164,6 +182,40 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                 "00000000000000000000000000000001");
         assertThat(logs).contains("你好，我想查询订单", userId, traceId, "line.reply.sent", "user.message.received");
         assertThat(logs).doesNotContain(textEvent.path("message").path("quoteToken").asText());
+        await().atMost(Duration.ofSeconds(5)).until(eventRecorder::isIdle);
+        var storedEvent = jdbc.queryForMap("SELECT * FROM event_log WHERE trace_id = ? AND event = 'user.message.received'", traceId);
+        assertThat(storedEvent.get("user_id")).isEqualTo(userId);
+        assertThat(storedEvent.get("webhook_event_id")).isEqualTo(textEvent.path("webhookEventId").asText());
+        assertThat(mapper.readTree(storedEvent.get("detail").toString()).path("content").path("text").asText())
+                .isEqualTo(textEvent.path("message").path("text").asText());
+        var eventExample = readJson("webhook/event-log.json");
+        for (String column : List.of("event", "level", "webhook_event_id", "user_id", "outcome", "message_type")) {
+            assertThat(storedEvent.get(column)).isEqualTo(eventExample.path(column).asText());
+        }
+        assertThat(mapper.readTree(storedEvent.get("detail").toString())).isEqualTo(eventExample.path("detail"));
+        var storedAudit = jdbc.queryForMap("SELECT * FROM audit_log WHERE trace_id = ?", pushResponse.getHeaders().getFirst("X-Trace-Id"));
+        assertThat(storedAudit.get("event")).isEqualTo("internal.push.invoked");
+        assertThat(storedAudit.get("operator")).isEqualTo("internal-token");
+        assertThat(storedAudit.get("source_ip")).isNotNull();
+        assertThat(storedAudit.get("target_user_id")).isEqualTo(readJson("push/internal-push-request.json").path("userId").asText());
+        assertThat(storedAudit.get("outcome")).isEqualTo("SUCCESS");
+        assertThat(mapper.readTree(storedAudit.get("detail").toString()).path("content").path("text").asText())
+                .isEqualTo(readJson("push/internal-push-request.json").path("text").asText());
+        var auditExample = readJson("push/audit-log.json");
+        for (String column : List.of("event", "operator", "target_user_id", "outcome")) {
+            assertThat(storedAudit.get(column)).isEqualTo(auditExample.path(column).asText());
+        }
+        assertThat(mapper.readTree(storedAudit.get("detail").toString())).isEqualTo(auditExample.path("detail"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE event = 'persist.failed'", Integer.class)).isZero();
+        assertThat(jdbc.queryForList("SELECT detail::text FROM event_log", String.class).toString())
+                .doesNotContain("documentation-test-secret", "documentation-test-token", "documentation-internal-token",
+                        textEvent.path("replyToken").asText(), textEvent.path("message").path("quoteToken").asText());
+        assertThat(jdbc.queryForList("SELECT detail::text FROM audit_log", String.class).toString())
+                .doesNotContain("documentation-test-token", "documentation-internal-token");
+        assertThat(meters.get("webhook.requests").counter().count()).isEqualTo(12);
+        assertThat(meters.get("webhook.signature.failed").counter().count()).isEqualTo(1);
+        assertThat(meters.get("webhook.dedup.hits").counter().count()).isEqualTo(1);
+        assertThat(meters.get("line.push.failed").counter().count()).isZero();
     }
 
     private ResponseEntity<String> send(byte[] body, boolean correctSignature) throws Exception {
@@ -182,6 +234,8 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     }
 
     private void awaitWorkers() {
+        await().atMost(Duration.ofSeconds(5)).until(() -> webhookAdmissionExecutor.getActiveCount()==0 && webhookAdmissionExecutor.getQueueSize()==0);
+        await().atMost(Duration.ofSeconds(5)).until(aiScheduler::isIdle);
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookExecutor.getActiveCount() == 0
                 && webhookExecutor.getThreadPoolExecutor().getQueue().isEmpty());
     }

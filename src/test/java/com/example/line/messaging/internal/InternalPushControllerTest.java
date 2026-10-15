@@ -17,10 +17,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** 验证内部 Push 的开关、独立鉴权、接受回执和安全错误映射。 */
 class InternalPushControllerTest {
     private final LineMessageService messages = mock(LineMessageService.class);
+    private final com.example.line.audit.AuditService audit = mock(com.example.line.audit.AuditService.class);
     private static final String BODY = "{\"userId\":\"Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"text\":\"hello\"}";
     private MockMvc mvc(boolean enabled) {
         return MockMvcBuilders.standaloneSetup(new InternalPushController(
-                new InternalPushProperties(enabled, "test-internal-token"), messages))
+                new InternalPushProperties(enabled, "test-internal-token"), messages, audit))
                 .setControllerAdvice(new ApiExceptionHandler()).build();
     }
     // 场景：关闭接口或鉴权缺失/错误时，不调用消息发送服务。
@@ -34,6 +35,7 @@ class InternalPushControllerTest {
         mvc.perform(post("/internal/push").contentType("application/json").content(BODY)
                 .header("X-Internal-Token", "wrong")).andExpect(status().isUnauthorized());
         verifyNoInteractions(messages);
+        verifyNoInteractions(audit);
     }
     // 场景：正确鉴权的请求返回 ACCEPTED 和本次 Retry Key。
     @Test
@@ -45,6 +47,8 @@ class InternalPushControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACCEPTED"))
                 .andExpect(jsonPath("$.retryKey").value(key.toString()));
         verify(messages).pushText("Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "hello");
+        verify(audit).record(eq("internal.push.invoked"), eq("internal-token"), eq("127.0.0.1"),
+                eq("Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), eq("SUCCESS"), anyMap());
     }
     // 场景：参数、上游 4xx 与瞬时故障映射到不同 HTTP 状态，且不泄露原始错误消息。
     @Test
@@ -62,5 +66,7 @@ class InternalPushControllerTest {
                 .andExpect(jsonPath("$.upstreamStatus").value(401));
         mvc.perform(post("/internal/push").contentType("application/json").content(BODY)
                 .header("X-Internal-Token", "test-internal-token")).andExpect(status().isServiceUnavailable());
+        verify(audit, times(3)).record(eq("internal.push.invoked"), eq("internal-token"), anyString(),
+                eq("Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), eq("FAILED"), anyMap());
     }
 }

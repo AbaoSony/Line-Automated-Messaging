@@ -59,13 +59,31 @@ public class LineApiCaller {
      * @throws LineSendException 4xx、有限重试耗尽、未预期 SDK 错误或中断时抛出安全分类异常
      */
     public boolean execute(String operation, UUID pushRetryKey, Supplier<? extends CompletableFuture<?>> request) {
+        return execute(operation,pushRetryKey,request,null);
+    }
+
+    /**
+     * 在共享截止时间内执行 Reply，旧调用继续使用原有独立策略。
+     * @param operation 操作名称
+     * @param pushRetryKey Push 幂等键，Reply 为空
+     * @param request SDK 调用
+     * @param deadline AI 统一截止时间，非 AI 调用为空
+     * @return LINE 接受状态
+     * @throws LineSendException 超时、上游失败或中断时抛出
+     */
+    public boolean execute(String operation,UUID pushRetryKey,Supplier<? extends CompletableFuture<?>> request,
+                           com.example.line.common.execution.Deadline deadline) {
         // Reply Token 一次性且短效，不能照搬 Push 的幂等重试策略。
         int attempts = pushRetryKey == null ? 1 : properties.maxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             CompletableFuture<?> future = null;
             try {
+                var wait=deadline==null?properties.attemptTimeout():deadline.limit(properties.attemptTimeout());
+                if(wait.isZero())throw new TimeoutException();
                 future = request.get();
-                future.get(properties.attemptTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                if(deadline!=null)wait=deadline.limit(wait);
+                if(wait.isZero())throw new TimeoutException();
+                future.get(wait.toNanos(), TimeUnit.NANOSECONDS);
                 return false;
             } catch (InterruptedException e) {
                 if (future != null) future.cancel(true);

@@ -22,7 +22,8 @@ import static org.mockito.Mockito.*;
 class MessageEventHandlerTest {
     private final MessagingApiClient client = mock(MessagingApiClient.class);
     private final MessageEventHandler handler = new MessageEventHandler(new LineMessageService(client,
-            new LineApiCaller(new LineSendProperties(3, Duration.ofSeconds(1), Duration.ofMillis(1)))), mock(com.example.line.chat.ChatMessageService.class));
+            new LineApiCaller(new LineSendProperties(3, Duration.ofSeconds(1), Duration.ofMillis(1)))), mock(com.example.line.chat.ChatMessageService.class),
+            mock(com.example.line.ai.AiChatService.class),Runnable::run);
 
     // 场景：中文文本与 hello 都使用当前事件的 Reply Token 原样回显。
     @ParameterizedTest
@@ -80,7 +81,11 @@ class MessageEventHandlerTest {
     }
 
     private MessageEvent event(String sample) throws IOException {
-        return (MessageEvent) ModelObjectMapper.createNewObjectMapper().readValue(
-                Files.readAllBytes(Path.of("docs/examples/webhook/webhook-" + sample + ".json")), CallbackRequest.class).events().get(0);
+        var mapper=ModelObjectMapper.createNewObjectMapper();
+        var root=mapper.readTree(Files.readAllBytes(Path.of("docs/examples/webhook/webhook-"+sample+".json")));
+        // 群聊保留既有回显；私聊 AI 转交另有独立测试，不能再把私聊当 echo 验证。
+        var source=(com.fasterxml.jackson.databind.node.ObjectNode)root.path("events").get(0).path("source");
+        source.put("type","group").put("groupId","Caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        return (MessageEvent)mapper.treeToValue(root,CallbackRequest.class).events().get(0);
     }
 }

@@ -27,12 +27,16 @@ class UserPersistenceIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ThreadPoolTaskExecutor persistenceExecutor;
     @Autowired private ExtraPurger extra;
+    @Autowired private com.example.line.common.logging.EventRecorder recorder;
 
     @BeforeEach
     void clearUserData() {
         drain();
+        await().atMost(5, TimeUnit.SECONDS).until(recorder::isIdle);
         jdbc.update("DELETE FROM chat_message");
         jdbc.update("DELETE FROM line_user");
+        jdbc.update("DELETE FROM event_log");
+        jdbc.update("DELETE FROM audit_log");
         extra.calls.set(0);
         extra.fail = false;
     }
@@ -67,10 +71,14 @@ class UserPersistenceIntegrationTest extends PostgresIntegrationSupport {
     @Test
     void deleteAllCallsEveryRegisteredPurgerAndRemovesUserAndChat() {
         seed();
+        seedLogData();
         deletion.deleteAll(USER);
         assertThat(extra.calls.get()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM line_user WHERE user_id = ?", Integer.class, USER)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM chat_message WHERE user_id = ?", Integer.class, USER)).isZero();
+        await().atMost(5, TimeUnit.SECONDS).until(recorder::isIdle);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_log WHERE user_id = ? AND event != 'user.data.deleted'", Integer.class, USER)).isZero();
+        assertThat(jdbc.queryForList("SELECT outcome FROM audit_log WHERE target_user_id = ?", String.class, USER)).containsExactly("SUCCESS");
         deletion.deleteAll(USER);
         assertThat(extra.calls.get()).isEqualTo(2);
     }
@@ -78,16 +86,28 @@ class UserPersistenceIntegrationTest extends PostgresIntegrationSupport {
     @Test
     void failedPurgerRollsBackBusinessDatabaseDeletion() {
         seed();
+        seedLogData();
         extra.fail = true;
         assertThatThrownBy(() -> deletion.deleteAll(USER)).isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM line_user WHERE user_id = ?", Integer.class, USER)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM chat_message WHERE user_id = ?", Integer.class, USER)).isEqualTo(1);
+        await().atMost(5, TimeUnit.SECONDS).until(recorder::isIdle);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM event_log WHERE user_id = ? AND event = 'user.follow'", Integer.class, USER)).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT outcome FROM audit_log WHERE target_user_id = ? AND event = 'user.data.deleted'", String.class, USER))
+                .containsExactly("FAILED");
     }
 
     private void seed() {
         users.recordStatus(USER, true, Instant.now());
         drain();
         jdbc.update("INSERT INTO chat_message (user_id, direction, message_type, content) VALUES (?, 'OUTBOUND', 'TEXT', '{}'::jsonb)", USER);
+    }
+
+    private void seedLogData() {
+        jdbc.update("INSERT INTO event_log (id,ts,event,level,trace_id,user_id,detail,service,env,version,instance) "
+                + "VALUES (?,now(),'user.follow','INFO','fictional-old-trace',?,'{}','test','test','test','test')", java.util.UUID.randomUUID(), USER);
+        jdbc.update("INSERT INTO audit_log (id,event,operator,target_user_id,trace_id,outcome,detail,created_at) "
+                + "VALUES (?,'internal.push.invoked','fictional-operator',?,'fictional-old-trace','SUCCESS','{}',now())", java.util.UUID.randomUUID(), USER);
     }
 
     private String status() { return jdbc.queryForObject("SELECT status FROM line_user WHERE user_id = ?", String.class, USER); }

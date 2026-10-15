@@ -25,6 +25,7 @@ public class LineMessageService {
     private static final Logger log = LoggerFactory.getLogger(LineMessageService.class);
     private final MessagingApiClient client;
     private final LineApiCaller caller;
+    private final com.example.line.common.execution.UserWorkTracker tracker;
 
     /**
      * 注入消息客户端与统一发送策略，调用方无需重复实现重试或错误映射。
@@ -33,8 +34,20 @@ public class LineMessageService {
      * @param caller 执行有限等待、Push 退避与安全异常转换的调用器
      */
     public LineMessageService(MessagingApiClient client, LineApiCaller caller) {
+        this(client,caller,new com.example.line.common.execution.UserWorkTracker());
+    }
+
+    /**
+     * 接入统一发送工作跟踪，让手动 Push 与 Reply 同样受用户删除屏障保护。
+     * @param client 官方消息客户端
+     * @param caller 有界发送策略
+     * @param tracker 单实例用户工作跟踪
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public LineMessageService(MessagingApiClient client,LineApiCaller caller,com.example.line.common.execution.UserWorkTracker tracker) {
         this.client = client;
         this.caller = caller;
+        this.tracker=tracker;
     }
 
     /**
@@ -54,6 +67,24 @@ public class LineMessageService {
     }
 
     /**
+     * 在 AI 原始截止时间内发送一次文本，不重试、不改 Push，超时结果视为未知。
+     * @param replyToken 当前短效凭证
+     * @param text 经 LINE 长度校验的文本
+     * @param deadline 原请求截止时间
+     * @throws IllegalArgumentException 文本或凭证无效时抛出
+     * @throws LineSendException LINE 失败或超时时抛出，调用方不得补发兜底
+     */
+    public void replyText(String replyToken,String text,com.example.line.common.execution.Deadline deadline) {
+        if(replyToken==null || replyToken.isBlank())throw new IllegalArgumentException("Missing reply token");
+        var request=new ReplyMessageRequest.Builder(replyToken,List.of(LineMessages.text(text))).build();
+        try(var lease=sending(org.slf4j.MDC.get("user_id"),false)) {
+            BusinessLog.write(log,Level.INFO,LogEvents.LINE_REPLY_REQUESTED,"LINE reply requested",BusinessLog.fields("messages",LogData.business(request.messages())));
+            caller.execute("reply",null,() -> client.replyMessage(request),deadline);
+            BusinessLog.write(log,Level.INFO,LogEvents.LINE_REPLY_SENT,"LINE reply accepted",BusinessLog.fields("outcome","SUCCESS"));
+        }
+    }
+
+    /**
      * 使用当前事件 Token 一次回复多条消息，不拆批、不自动改为 Push。
      *
      * @param replyToken 非空白、尚可使用的短效一次性 Reply Token，有效性最终由 LINE 判定
@@ -66,11 +97,13 @@ public class LineMessageService {
             throw new IllegalArgumentException("Missing reply token");
         }
         var request = new ReplyMessageRequest.Builder(replyToken, validateMessages(messages)).build();
-        BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_REQUESTED, "LINE reply requested",
-                BusinessLog.fields("messages", LogData.business(request.messages())));
-        caller.execute("reply", null, () -> client.replyMessage(request));
-        BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_SENT, "LINE reply accepted",
-                BusinessLog.fields("outcome", "SUCCESS"));
+        try(var lease=sending(org.slf4j.MDC.get("user_id"),false)) {
+            BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_REQUESTED, "LINE reply requested",
+                    BusinessLog.fields("messages", LogData.business(request.messages())));
+            caller.execute("reply", null, () -> client.replyMessage(request));
+            BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_SENT, "LINE reply accepted",
+                    BusinessLog.fields("outcome", "SUCCESS"));
+        }
     }
 
     /**
@@ -103,7 +136,7 @@ public class LineMessageService {
         var request = new PushMessageRequest.Builder(userId, validateMessages(messages)).build();
         // 必须从首次请求就设置 Key，不能等遇到超时后再生成，否则无法去除已执行的重复请求。
         UUID retryKey = UUID.randomUUID();
-        try (var scope = LogContext.user(userId)) {
+        try (var scope = LogContext.user(userId);var lease=sending(userId,true)) {
             BusinessLog.write(log, Level.INFO, LogEvents.LINE_PUSH_REQUESTED, "LINE push requested",
                     BusinessLog.fields("messages", LogData.business(request.messages())));
             boolean alreadyAccepted = caller.execute("push", retryKey, () -> client.pushMessage(retryKey, request));
@@ -111,6 +144,16 @@ public class LineMessageService {
                     BusinessLog.fields("outcome", "SUCCESS"));
             return new PushReceipt(retryKey, alreadyAccepted);
         }
+    }
+
+    private com.example.line.common.execution.UserWorkTracker.Lease sending(String user,boolean push) {
+        var lease=tracker.register(user);
+        if(lease==null) {
+            BusinessLog.write(log,Level.WARN,push?LogEvents.LINE_PUSH_FAILED:LogEvents.LINE_REPLY_FAILED,
+                    "LINE send blocked by user work boundary",BusinessLog.fields("outcome","FAILED","reason","user_work_blocked"));
+            throw new LineSendException(LineSendException.Reason.TRANSIENT_FAILURE,null);
+        }
+        return lease;
     }
 
     private List<Message> validateMessages(List<Message> messages) {

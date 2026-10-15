@@ -43,7 +43,7 @@ class AsyncPersistenceTest {
 
     @Test
     void fullRealBoundedExecutorRejectsWithoutRunningOnCallerThread() throws Exception {
-        var executor = new PersistenceConfig().persistenceExecutor(new PersistenceProperties(1, 1, Duration.ofSeconds(5), 10));
+        var executor = new PersistenceConfig().persistenceExecutor(new PersistenceProperties(1, 1, Duration.ofSeconds(5), 10), new SimpleMeterRegistry());
         executor.initialize();
         var started = new CountDownLatch(1);
         var finish = new CountDownLatch(1);
@@ -74,7 +74,7 @@ class AsyncPersistenceTest {
 
     @Test
     void slowDatabaseDoesNotBlockSubmitAndMdcIsCopiedAndCleared() throws Exception {
-        var executor = new PersistenceConfig().persistenceExecutor(new PersistenceProperties(1, 2, Duration.ofSeconds(5), 10));
+        var executor = new PersistenceConfig().persistenceExecutor(new PersistenceProperties(1, 2, Duration.ofSeconds(5), 10), new SimpleMeterRegistry());
         executor.initialize();
         var started = new CountDownLatch(1);
         var finish = new CountDownLatch(1);

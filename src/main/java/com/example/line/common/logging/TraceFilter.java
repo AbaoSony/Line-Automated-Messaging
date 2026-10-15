@@ -33,6 +33,8 @@ public class TraceFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         try (var scope = LogContext.request()) {
+            MDC.put("received_nanos", Long.toString(System.nanoTime()));
+            MDC.put("received_at", java.time.Instant.now().toString());
             response.setHeader("X-Trace-Id", MDC.get("trace_id"));
             long start = System.nanoTime();
             boolean failed = false;

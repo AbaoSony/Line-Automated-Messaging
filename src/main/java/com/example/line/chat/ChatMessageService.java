@@ -64,6 +64,32 @@ public class ChatMessageService implements UserDataPurger {
     }
 
     /**
+     * 异步保存含来源、关联和生成用量的新入站或已接受出站；不传入事件凭证。
+     * @param userId 完整用户
+     * @param direction INBOUND / OUTBOUND
+     * @param messageId 入站幂等消息 ID，出站为空
+     * @param type 消息类型
+     * @param content 完整业务内容
+     * @param occurredAt 事件/发送时间
+     * @param metadata 来源、轮次关联与生成用量
+     * @throws IllegalArgumentException 必需字段缺失时抛出
+     */
+    public void recordMessage(String userId, String direction, String messageId, String type, JsonNode content,
+                              Instant occurredAt, ChatMetadata metadata) {
+        if (userId == null || userId.isBlank()) return;
+        if("INBOUND".equals(direction) && (messageId==null || messageId.isBlank())) {
+            persistence.submit(LogEvents.USER_MESSAGE_RECEIVED,userId,() -> {throw new IllegalArgumentException("Missing message ID");});return;
+        }
+        if (content == null || occurredAt == null || metadata == null || type == null)
+            throw new IllegalArgumentException("Missing conversation metadata");
+        JsonNode snapshot = content.deepCopy();
+        removeCredentials(snapshot);
+        String json = snapshot.toString();
+        persistence.submit("INBOUND".equals(direction) ? LogEvents.USER_MESSAGE_RECEIVED : LogEvents.LINE_REPLY_SENT,
+                userId, () -> repository.insert(userId, direction, messageId, type, json, occurredAt, metadata));
+    }
+
+    /**
      * 删除本模块的全部用户对话记录，供显式手动删除事务调用。
      * @param userId 完整用户标识
      * @throws org.springframework.dao.DataAccessException 数据库操作失败时抛出

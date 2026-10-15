@@ -29,7 +29,7 @@ class WebhookServiceTest {
         return ("""
                 {"destination":"Ubot","events":[{"webhookEventId":"%s","timestamp":1,
                 "mode":"active","deliveryContext":{"isRedelivery":%s},
-                "source":{"type":"user","userId":"Utest"},%s}]}
+                "source":{"type":"group","groupId":"Ctest","userId":"Utest"},%s}]}
                 """.formatted(id, redelivery, details)).getBytes(StandardCharsets.UTF_8);
     }
 
@@ -38,7 +38,7 @@ class WebhookServiceTest {
     void textIsRepliedAndRedeliveryIsDeduplicated() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class), mock(com.example.line.ai.AiChatService.class), Runnable::run))), cache());
         String text = """
                 "type":"message","replyToken":"reply","message":{"type":"text","id":"123","text":"你好"}
                 """;
@@ -53,7 +53,7 @@ class WebhookServiceTest {
     void unsupportedImageStickerLocationAndFileAreReplied() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class), mock(com.example.line.ai.AiChatService.class), Runnable::run))), cache());
         List<String> contents = List.of(
                 """
                 {"type":"image","id":"1","contentProvider":{"type":"line"}}
@@ -80,9 +80,9 @@ class WebhookServiceTest {
         var follow = mock(FollowEventHandler.class);
         var unfollow = mock(UnfollowEventHandler.class);
         var postback = mock(PostbackEventHandler.class);
-        when(follow.eventType()).thenReturn(FollowEvent.class);
-        when(unfollow.eventType()).thenReturn(UnfollowEvent.class);
-        when(postback.eventType()).thenReturn(PostbackEvent.class);
+        when(follow.eventType()).thenReturn(FollowEvent.class); doCallRealMethod().when(follow).handleAsync(any());
+        when(unfollow.eventType()).thenReturn(UnfollowEvent.class); doCallRealMethod().when(unfollow).handleAsync(any());
+        when(postback.eventType()).thenReturn(PostbackEvent.class); doCallRealMethod().when(postback).handleAsync(any());
         var service = new WebhookService(Runnable::run,
                 new EventDispatcher(List.of(follow, unfollow, postback)), cache());
         service.process(payload("follow", false, "\"type\":\"follow\",\"replyToken\":\"r\""));
@@ -97,13 +97,13 @@ class WebhookServiceTest {
     // 场景：处理失败释放 ID，之后再次投递可以执行，成功后再次去重。
     void handlerFailureReleasesIdAndDoesNotBlockLaterEvents() throws Exception {
         var dispatcher = mock(EventDispatcher.class);
-        doThrow(new IllegalStateException()).doNothing().when(dispatcher).dispatch(any());
+        when(dispatcher.dispatchAsync(any())).thenThrow(new IllegalStateException()).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
         var service = new WebhookService(Runnable::run, dispatcher, cache());
         byte[] body = payload("retry", true, "\"type\":\"unfollow\"");
         service.process(body);
         service.process(body);
         service.process(body);
-        verify(dispatcher, times(2)).dispatch(any());
+        verify(dispatcher, times(2)).dispatchAsync(any());
     }
 
     @Test
@@ -119,8 +119,8 @@ class WebhookServiceTest {
             started.countDown();
             try { assertThat(release.await(5, TimeUnit.SECONDS)).isTrue(); }
             finally { finished.countDown(); }
-            return null;
-        }).when(dispatcher).dispatch(any());
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }).when(dispatcher).dispatchAsync(any());
         var executor = Executors.newSingleThreadExecutor();
         try {
             new WebhookService(executor, dispatcher, cache())
@@ -140,7 +140,7 @@ class WebhookServiceTest {
     void queuedReplyOlderThan15SecondsIsNotSent() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
-                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class)))), cache());
+                new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class), mock(com.example.line.ai.AiChatService.class), Runnable::run))), cache());
         service.process(payload("stale", false,
                 "\"type\":\"message\",\"replyToken\":\"reply\",\"message\":{\"type\":\"text\",\"id\":\"1\",\"text\":\"hello\"}"),
                 System.nanoTime() - TimeUnit.SECONDS.toNanos(16));

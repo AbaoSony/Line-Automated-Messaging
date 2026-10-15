@@ -43,15 +43,21 @@ class LoggingFlowIntegrationTest extends PostgresIntegrationSupport {
     private final ObjectMapper mapper = new ObjectMapper();
     @Autowired private TestRestTemplate http;
     @Autowired private ThreadPoolTaskExecutor webhookExecutor;
+    @Autowired private ThreadPoolTaskExecutor webhookAdmissionExecutor;
+    @Autowired private com.example.line.ai.coordination.SessionScheduler aiScheduler;
     @Autowired private ThreadPoolTaskExecutor persistenceExecutor;
     @MockitoBean private MessagingApiClient client;
     @MockitoSpyBean private ChatRepository repository;
+    @MockitoSpyBean private com.example.line.common.logging.recording.EventLogRepository logRepository;
+    @Autowired private com.example.line.common.logging.EventRecorder recorder;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
 
     @Test
     void fullFlowRetainsOriginalDataSharesTraceAcrossWorkersAndNeverLogsCredentials(CapturedOutput logs) throws Exception {
         when(client.replyMessage(any())).thenReturn(CompletableFuture.completedFuture(null));
         doThrow(new DataAccessResourceFailureException("fake-flow-database-password"))
-                .when(repository).insert(any(), any(), nullable(String.class), any(), any(), any());
+                .when(repository).insert(any(), any(), nullable(String.class), any(), any(), any(),any());
         String body = """
                 {"destination":"Ufictional-bot","events":[{"type":"message","webhookEventId":"fictional-flow-event",
                  "timestamp":1,"mode":"active","deliveryContext":{"isRedelivery":false},
@@ -137,6 +143,75 @@ class LoggingFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(logs).doesNotContain("fake-flow-channel-secret", "fake-flow-channel-token", "fake-flow-internal-token",
                 "fake-flow-reply-token", "fake-flow-quote-token", "fake-flow-read-token", "fake-flow-database-password",
                 "fake-malformed-reply-token", "fake-upstream-api-key", "fake-client-provided-trace", "fake-untrusted-internal-token", signature);
+        await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
+        assertThat(jdbc.queryForObject("SELECT detail->'content'->>'text' FROM event_log WHERE trace_id = ? AND event = 'user.message.received'",
+                String.class, traceId)).isEqualTo("完整虚构中文消息");
+        String storedAudit = jdbc.queryForObject("SELECT detail::text FROM audit_log WHERE trace_id = ?", String.class,
+                push.getHeaders().getFirst("X-Trace-Id"));
+        assertThat(storedAudit).contains("完整虚构推送内容");
+        String allData = jdbc.queryForList("SELECT detail::text FROM event_log", String.class).toString()
+                + jdbc.queryForList("SELECT detail::text FROM audit_log", String.class);
+        assertThat(allData).doesNotContain("fake-flow-channel-secret", "fake-flow-channel-token", "fake-flow-internal-token",
+                "fake-flow-reply-token", "fake-flow-quote-token", "fake-flow-read-token", "fake-flow-database-password",
+                "fake-malformed-reply-token", "fake-upstream-api-key", "fake-untrusted-internal-token", signature, "stack_trace");
+    }
+
+    @Test
+    void databaseAuditFailureStillReturnsAcceptedAndFallsBackWithoutRecursion(CapturedOutput logs) throws Exception {
+        await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
+        doThrow(new DataAccessResourceFailureException("fake-private-log-database-password")).when(logRepository).write(anyList());
+        when(client.pushMessage(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", "fake-flow-internal-token");
+        var response = http.postForEntity("/internal/push", new HttpEntity<>(mapper.writeValueAsString(
+                java.util.Map.of("userId", USER, "text", "虚构审计失败仍成功推送")), headers), String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
+        verify(client).pushMessage(any(), any());
+        String trace = response.getHeaders().getFirst("X-Trace-Id");
+        var matching = events(logs.getOut(), trace);
+        assertThat(matching).anySatisfy(event -> {
+            assertThat(event.path("event").asText()).isEqualTo("internal.push.invoked");
+            assertThat(event.path("persistence_fallback").asBoolean()).isTrue();
+        });
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE trace_id = ?", Integer.class, trace)).isZero();
+        assertThat(meters.get("persist.failed").tag("operation", "audit_log").counter().count()).isGreaterThanOrEqualTo(1);
+        assertThat(logs).doesNotContain("fake-private-log-database-password", "fake-flow-internal-token");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE event = 'persist.failed'", Integer.class)).isZero();
+    }
+
+    @Test
+    void finalSendFailureCountsOnceAndAuditsFailedOperation(CapturedOutput logs) throws Exception {
+        var upstream = mock(AbstractLineClientException.class);
+        when(upstream.getCode()).thenReturn(401);
+        when(upstream.getMessage()).thenReturn("fake-private-upstream-key");
+        when(client.pushMessage(any(), any())).thenReturn(CompletableFuture.failedFuture(upstream));
+        when(client.replyMessage(any())).thenReturn(CompletableFuture.failedFuture(upstream));
+        double pushBefore = meters.get("line.push.failed").counter().count();
+        double replyBefore = meters.get("line.reply.failed").counter().count();
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Internal-Token", "fake-flow-internal-token");
+        var response = http.postForEntity("/internal/push", new HttpEntity<>(mapper.writeValueAsString(
+                java.util.Map.of("userId", USER, "text", "虚构失败推送")), headers), String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY);
+        String body = """
+                {"events":[{"type":"message","webhookEventId":"fictional-failed-reply","timestamp":1,"mode":"active",
+                "source":{"type":"user","userId":"%s"},"replyToken":"fake-private-failed-reply-token",
+                "message":{"type":"text","id":"fictional-failed-message","text":"虚构失败回复"}}]}
+                """.formatted(USER);
+        assertThat(http.postForEntity("/line/webhook", new HttpEntity<>(body, signedHeaders(body)), String.class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        drain();
+        await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
+        assertThat(meters.get("line.push.failed").counter().count()).isEqualTo(pushBefore + 1);
+        assertThat(meters.get("line.reply.failed").counter().count()).isEqualTo(replyBefore + 1);
+        assertThat(jdbc.queryForObject("SELECT outcome FROM audit_log WHERE trace_id = ?", String.class,
+                response.getHeaders().getFirst("X-Trace-Id"))).isEqualTo("FAILED");
+        verify(client).pushMessage(any(), any());
+        verify(client).replyMessage(any());
+        assertThat(logs).doesNotContain("fake-private-upstream-key", "fake-private-failed-reply-token");
     }
 
     private HttpHeaders signedHeaders(String body) throws Exception {
@@ -158,6 +233,8 @@ class LoggingFlowIntegrationTest extends PostgresIntegrationSupport {
     }
 
     private void drain() {
+        await().atMost(Duration.ofSeconds(5)).until(() -> webhookAdmissionExecutor.getActiveCount()==0 && webhookAdmissionExecutor.getQueueSize()==0);
+        await().atMost(Duration.ofSeconds(5)).until(aiScheduler::isIdle);
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookExecutor.getActiveCount() == 0
                 && webhookExecutor.getThreadPoolExecutor().getQueue().isEmpty());
         await().atMost(Duration.ofSeconds(5)).until(() -> persistenceExecutor.getActiveCount() == 0

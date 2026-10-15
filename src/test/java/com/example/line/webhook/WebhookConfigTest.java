@@ -17,8 +17,9 @@ class WebhookConfigTest {
     // 场景：一个任务执行、一个任务排队后，新任务被拒绝并输出队列水位。
     @Test
     void fullBoundedPoolRejectsWithLogInsteadOfRunningOnCaller(CapturedOutput output) throws Exception {
+        var meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         var executor = new WebhookConfig().webhookExecutor(
-                new WebhookProperties(1, 1, Duration.ofHours(24), 100, 100));
+                new WebhookProperties(1, 1, Duration.ofHours(24), 100, 100), meters);
         executor.initialize();
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -33,6 +34,7 @@ class WebhookConfigTest {
             assertThatThrownBy(() -> executor.execute(() -> fail("Must not run on request thread")))
                     .isInstanceOf(TaskRejectedException.class);
             assertThat(output).contains("LINE webhook task rejected", "queued=1");
+            assertThat(meters.get("webhook.rejected").counter().count()).isEqualTo(1);
         } finally {
             release.countDown();
             executor.shutdown();

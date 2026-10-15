@@ -1,13 +1,11 @@
 package com.example.line.messaging.internal;
 
-import com.example.line.messaging.internal.InternalPushProperties;
 import com.example.line.messaging.LineMessageService;
 import com.example.line.common.logging.BusinessLog;
 import com.example.line.common.logging.LogContext;
 import com.example.line.common.logging.LogEvents;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.event.Level;
+import com.example.line.audit.AuditService;
+import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.springframework.http.ResponseEntity;
@@ -20,18 +18,20 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 public class InternalPushController {
-    private static final Logger log = LoggerFactory.getLogger(InternalPushController.class);
     private final InternalPushProperties properties;
     private final LineMessageService messages;
+    private final AuditService audit;
     /**
      * 注入调试访问策略与统一消息发送服务。
      *
      * @param properties 调试开关和独立鉴权配置，启用时鉴权值必须非空白
      * @param messages 执行参数校验、SDK Push 和有限幂等重试的服务
+     * @param audit 通过独立队列记录敏感操作，不阻塞消息发送
      */
-    public InternalPushController(InternalPushProperties properties, LineMessageService messages) {
+    public InternalPushController(InternalPushProperties properties, LineMessageService messages, AuditService audit) {
         this.properties = properties;
         this.messages = messages;
+        this.audit = audit;
     }
     /** 内部文本推送请求，字段限制由消息发送服务校验，不代表已经通过鉴权。 */
     public record PushTextRequest(String userId, String text) {}
@@ -49,13 +49,14 @@ public class InternalPushController {
      *
      * @param token X-Internal-Token 请求头；启用接口时必须与独立调试配置匹配，缺失视为未授权
      * @param request 文本请求；userId 必须为 U 加 32 个小写十六进制字符，text 非空白且不超过 5000 个 UTF-16 单元
+     * @param httpRequest 获取直接连接来源，不使用客户端可伪造的转发头
      * @return 关闭时为 404、鉴权失败为 401、LINE 接受时为带 PushResponse 的 200
      * @throws IllegalArgumentException 请求字段不满足发送层约束时抛出，由统一处理器转换为 400
      * @throws com.example.line.messaging.LineSendException LINE 调用失败或中断时抛出，由统一处理器转换为 502/503
      */
     @PostMapping("/internal/push")
     public ResponseEntity<?> push(@RequestHeader(value = "X-Internal-Token", required = false) String token,
-                                 @RequestBody PushTextRequest request) {
+                                 @RequestBody PushTextRequest request, HttpServletRequest httpRequest) {
         if (!properties.isEnabled()) return ResponseEntity.notFound().build();
         // 字节比较避免按匹配前缀逐字符提前返回；不得记录提供值或配置值来排查鉴权失败。
         if (token == null || !MessageDigest.isEqual(properties.getToken().getBytes(StandardCharsets.UTF_8),
@@ -63,13 +64,14 @@ public class InternalPushController {
         try (var scope = LogContext.user(request.userId())) {
             try {
                 var receipt = messages.pushText(request.userId(), request.text());
-                BusinessLog.write(log, Level.INFO, LogEvents.INTERNAL_PUSH_INVOKED, "Internal push invoked",
+                audit.record(LogEvents.INTERNAL_PUSH_INVOKED, "internal-token", httpRequest.getRemoteAddr(), request.userId(), "SUCCESS",
                         BusinessLog.fields("outcome", "SUCCESS", "http_status", 200,
                                 "content", BusinessLog.fields("text", request.text())));
                 return ResponseEntity.ok(new PushResponse("ACCEPTED", receipt.retryKey().toString(), receipt.alreadyAccepted()));
             } catch (RuntimeException failure) {
-                BusinessLog.failure(log, Level.ERROR, LogEvents.INTERNAL_PUSH_INVOKED, "Internal push failed", failure,
-                        BusinessLog.fields("outcome", "FAILED", "content", BusinessLog.fields("text", request.text())));
+                audit.record(LogEvents.INTERNAL_PUSH_INVOKED, "internal-token", httpRequest.getRemoteAddr(), request.userId(), "FAILED",
+                        BusinessLog.fields("error_type", failure.getClass().getSimpleName(),
+                                "content", BusinessLog.fields("text", request.text())));
                 throw failure;
             }
         }

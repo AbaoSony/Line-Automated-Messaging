@@ -1,0 +1,15 @@
+{
+  "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "event": "internal.push.invoked",
+  "operator": "internal-token",
+  "source_ip": "127.0.0.1",
+  "target_user_id": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "trace_id": "33333333-3333-4333-8333-333333333333",
+  "outcome": "SUCCESS",
+  "detail": {
+    "content": {
+      "text": "hello from push"
+    }
+  },
+  "created_at": "2026-10-15T04:00:01Z"
+}

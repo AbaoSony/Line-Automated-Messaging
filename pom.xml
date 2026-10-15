@@ -15,11 +15,26 @@
     <properties>
         <java.version>17</java.version>
         <line-bot-sdk.version>10.2.0</line-bot-sdk.version>
+        <openai-java.version>4.81.0</openai-java.version>
+        <redis.image>redis:8.2.10-alpine</redis.image>
         <postgresql.image>postgres:18.6-alpine</postgresql.image>
         <!-- 该 11.x 版本明确支持 PostgreSQL 18，保持现有 Spring Boot 大版本。 -->
         <flyway.version>11.15.0</flyway.version>
     </properties>
     <dependencies>
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+            <version>${openai-java.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
@@ -81,6 +96,7 @@
                     <argLine>-Dfile.encoding=UTF-8</argLine>
                     <systemPropertyVariables>
                         <test.postgresql.image>${postgresql.image}</test.postgresql.image>
+                        <test.redis.image>${redis.image}</test.redis.image>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

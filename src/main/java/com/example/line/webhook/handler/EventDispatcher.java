@@ -55,4 +55,19 @@ public class EventDispatcher {
     private <E extends Event> void invoke(EventHandler<E> handler, Event event) throws Exception {
         handler.handle(handler.eventType().cast(event));
     }
+
+    /**
+     * 取得异步完成阶段，防止仅入会话队列就提前完成或释放事件去重占用。
+     * @param event 已验签事件
+     * @return 真实业务终态，未知事件安全完成
+     * @throws Exception 同步策略准备失败时抛出
+     */
+    public java.util.concurrent.CompletionStage<Void> dispatchAsync(Event event) throws Exception {
+        var handler=handlers.get(event.getClass());
+        if(handler==null){dispatch(event);return java.util.concurrent.CompletableFuture.completedFuture(null);}
+        return invokeAsync(handler,event);
+    }
+    private <E extends Event> java.util.concurrent.CompletionStage<Void> invokeAsync(EventHandler<E> handler,Event event) throws Exception {
+        return handler.handleAsync(handler.eventType().cast(event));
+    }
 }

@@ -22,14 +22,14 @@ class ChatMessageServiceTest {
     void inboundAndOutboundDatabaseFailuresDoNotPreventEcho() throws Exception {
         var repository = mock(ChatRepository.class);
         doThrow(new DataAccessResourceFailureException("fake-db-password"))
-                .when(repository).insert(any(), any(), nullable(String.class), any(), any(), any());
+                .when(repository).insert(any(), any(), nullable(String.class), any(), any(), any(),any());
         var meters = new SimpleMeterRegistry();
         var chat = new ChatMessageService(repository, new AsyncPersistence(Runnable::run, meters));
         var messages = mock(LineMessageService.class);
         var event = event();
-        new MessageEventHandler(messages, chat).handle(event);
+        new MessageEventHandler(messages, chat,mock(com.example.line.ai.AiChatService.class),Runnable::run).handle(event);
         verify(messages).replyText(event.replyToken(), "hello");
-        verify(repository, times(2)).insert(any(), any(), nullable(String.class), any(), any(), any());
+        verify(repository, times(2)).insert(any(), any(), nullable(String.class), any(), any(), any(),any());
         assertThat(meters.get("persist.failed").tag("operation", "user.message.received").counter().count()).isEqualTo(1);
         assertThat(meters.get("persist.failed").tag("operation", "line.reply.sent").counter().count()).isEqualTo(1);
     }
@@ -41,9 +41,9 @@ class ChatMessageServiceTest {
         var messages = mock(LineMessageService.class);
         var event = event();
         doThrow(new IllegalStateException("Simulated send failure")).when(messages).replyText(any(), any());
-        assertThatThrownBy(() -> new MessageEventHandler(messages, chat).handle(event)).isInstanceOf(IllegalStateException.class);
-        verify(repository).insert(eq(event.source().userId()), eq("INBOUND"), eq(event.message().id()), eq("TEXT"), any(), any());
-        verify(repository, never()).insert(any(), eq("OUTBOUND"), any(), any(), any(), any());
+        assertThatThrownBy(() -> new MessageEventHandler(messages, chat,mock(com.example.line.ai.AiChatService.class),Runnable::run).handle(event)).isInstanceOf(IllegalStateException.class);
+        verify(repository).insert(eq(event.source().userId()), eq("INBOUND"), eq(event.message().id()), eq("TEXT"), any(), any(),any());
+        verify(repository, never()).insert(any(), eq("OUTBOUND"), any(), any(), any(), any(),any());
     }
 
     @Test
@@ -56,15 +56,18 @@ class ChatMessageServiceTest {
         var withoutId = new MessageEvent(original.source(), original.timestamp(), original.mode(),
                 original.webhookEventId(), original.deliveryContext(), original.replyToken(),
                 new TextMessageContent.Builder(null, "hello", "fake-quote-token").build());
-        new MessageEventHandler(messages, chat).handle(withoutId);
+        new MessageEventHandler(messages, chat,mock(com.example.line.ai.AiChatService.class),Runnable::run).handle(withoutId);
         verify(messages).replyText(original.replyToken(), "hello");
-        verify(repository, never()).insert(any(), eq("INBOUND"), any(), any(), any(), any());
-        verify(repository).insert(any(), eq("OUTBOUND"), isNull(), eq("TEXT"), any(), any());
+        verify(repository, never()).insert(any(), eq("INBOUND"), any(), any(), any(), any(),any());
+        verify(repository).insert(any(), eq("OUTBOUND"), isNull(), eq("TEXT"), any(), any(),any());
         assertThat(meters.get("persist.failed").counter().count()).isEqualTo(1);
     }
 
     private MessageEvent event() throws Exception {
-        return (MessageEvent) ModelObjectMapper.createNewObjectMapper().readValue(
-                Files.readAllBytes(Path.of("docs/examples/webhook/webhook-hello.json")), CallbackRequest.class).events().get(0);
+        var mapper=ModelObjectMapper.createNewObjectMapper();
+        var root=mapper.readTree(Files.readAllBytes(Path.of("docs/examples/webhook/webhook-hello.json")));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)root.path("events").get(0).path("source"))
+                .put("type","group").put("groupId","Caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        return (MessageEvent)mapper.treeToValue(root,CallbackRequest.class).events().get(0);
     }
 }

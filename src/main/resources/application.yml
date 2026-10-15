@@ -1,6 +1,21 @@
 server:
   port: 8080
 
+management:
+  server:
+    address: 127.0.0.1
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+    jmx:
+      exposure:
+        exclude: '*'
+  endpoint:
+    health:
+      show-details: never
+
 logging:
   config: classpath:logback-spring.xml
   structured:
@@ -19,6 +34,62 @@ spring:
     locations: classpath:db/migration
 
 line:
+  ai:
+    total-timeout: ${AI_TOTAL_TIMEOUT:15s}
+    send-reserve: ${AI_SEND_RESERVE:3s}
+    queue-wait: ${AI_QUEUE_WAIT:3s}
+    lock-wait: ${AI_LOCK_WAIT:500ms}
+    dependency-timeout: ${AI_DEPENDENCY_TIMEOUT:500ms}
+    workers: ${AI_WORKERS:4}
+    queue-capacity: ${AI_QUEUE_CAPACITY:256}
+    user-queue-capacity: ${AI_USER_QUEUE_CAPACITY:3}
+    max-users: ${AI_MAX_USERS:1024}
+    fallback: ${AI_FALLBACK:剛剛沒能順利回覆，可以再說一次嗎？}
+    busy: ${AI_BUSY:我還在處理上一則訊息，稍等一下再傳喔。}
+    rate-limited: ${AI_RATE_LIMITED:訊息有點多，稍等一下再聊喔。}
+    unavailable: ${AI_UNAVAILABLE:服務暫時開小差了，晚點再試一下喔。}
+    input-too-long: ${AI_INPUT_TOO_LONG:這則訊息有點長，可以分短一點說嗎？}
+    credentials:
+      api-key: ${OPENAI_API_KEY:}
+    model:
+      name: ${OPENAI_MODEL:gpt-6.1-sol}
+      reasoning: ${OPENAI_REASONING:low}
+      max-input-tokens: ${AI_MAX_INPUT_TOKENS:8192}
+      max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:1024}
+      total-timeout: ${AI_MODEL_TOTAL_TIMEOUT:8s}
+      attempt-timeout: ${AI_MODEL_ATTEMPT_TIMEOUT:4s}
+      connect-timeout: ${AI_MODEL_CONNECT_TIMEOUT:1s}
+      retry-backoff: ${AI_MODEL_RETRY_BACKOFF:100ms}
+    memory:
+      namespace: ${AI_NAMESPACE:}
+      rounds: ${AI_MEMORY_ROUNDS:10}
+      ttl: ${AI_MEMORY_TTL:7d}
+      scan-limit: ${AI_HISTORY_SCAN_LIMIT:200}
+      rate-limit: ${AI_RATE_LIMIT:12}
+      rate-window: ${AI_RATE_WINDOW:60s}
+    redis:
+      host: ${REDIS_HOST:}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      ssl: ${REDIS_SSL:false}
+  user-deletion:
+    timeout: ${USER_DELETION_TIMEOUT:20s}
+  event-recorder:
+    queue-capacity: ${LOG_QUEUE_CAPACITY:4096}
+    batch-size: ${LOG_BATCH_SIZE:100}
+    flush-interval: ${LOG_FLUSH_INTERVAL:1s}
+    pool-size: ${LOG_POOL_SIZE:2}
+    connection-timeout-ms: ${LOG_CONNECTION_TIMEOUT_MS:1000}
+    query-timeout-seconds: ${LOG_QUERY_TIMEOUT_SECONDS:3}
+  event-log:
+    cleanup-enabled: ${EVENT_LOG_CLEANUP_ENABLED:false}
+    retention-days: ${EVENT_LOG_RETENTION_DAYS:30}
+    cleanup-interval: ${EVENT_LOG_CLEANUP_INTERVAL:1h}
+  audit-log:
+    cleanup-enabled: ${AUDIT_LOG_CLEANUP_ENABLED:false}
+    retention-days: ${AUDIT_LOG_RETENTION_DAYS:180}
+    cleanup-interval: ${AUDIT_LOG_CLEANUP_INTERVAL:1h}
   logging:
     service: ${APP_SERVICE:line-messaging-service}
     env: ${APP_ENV:local}

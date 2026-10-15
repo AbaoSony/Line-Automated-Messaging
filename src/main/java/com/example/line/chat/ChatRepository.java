@@ -31,6 +31,60 @@ class ChatRepository {
                 """, userId, direction, lineMessageId, messageType, content, Timestamp.from(createdAt));
     }
 
+    void insert(String userId, String direction, String messageId, String type, String content, Instant time, ChatMetadata meta) {
+        jdbc.update("""
+                INSERT INTO chat_message (user_id,direction,line_message_id,message_type,content,created_at,
+                source_type,conversation_id,reply_kind,in_reply_to_message_id,correlation_id,received_at,received_sequence,
+                model_name,input_tokens,output_tokens,latency_ms)
+                VALUES (?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (line_message_id) WHERE direction = 'INBOUND' AND line_message_id IS NOT NULL DO NOTHING
+                """, userId, direction, messageId, type, content, Timestamp.from(time), meta.sourceType(), meta.conversationId(),
+                meta.replyKind(), meta.inReplyToMessageId(), meta.correlationId(), Timestamp.from(meta.receivedAt()),
+                meta.receivedSequence(), meta.model(), meta.inputTokens(), meta.outputTokens(), meta.latencyMs());
+    }
+
+    PrivateHistory privateHistory(String user, String currentId, Instant receivedAt, long sequence, int limit) {
+        var rows = jdbc.queryForList("""
+                SELECT * FROM chat_message WHERE user_id=? AND source_type='USER' AND conversation_id=?
+                AND (received_at < ? OR (received_at = ? AND received_sequence < ?))
+                AND (line_message_id IS NULL OR line_message_id <> ?)
+                ORDER BY received_at DESC,received_sequence DESC,id DESC LIMIT ?
+                """, user, user, Timestamp.from(receivedAt), Timestamp.from(receivedAt), sequence, currentId, limit);
+        var inbound = new java.util.LinkedHashMap<String, java.util.Map<String,Object>>();
+        Instant last = null;
+        for (var row : rows) if ("INBOUND".equals(row.get("direction"))) {
+            if (last == null) last = ((Timestamp) row.get("created_at")).toInstant();
+            if ("TEXT".equals(row.get("message_type"))) inbound.put((String) row.get("line_message_id"), row);
+        }
+        var paired = new java.util.LinkedHashMap<String, PrivateHistory.Turn>();
+        for (var row : rows) if ("OUTBOUND".equals(row.get("direction")) && "AI".equals(row.get("reply_kind"))) {
+            var input = inbound.get(row.get("in_reply_to_message_id"));
+            if (input == null || !java.util.Objects.equals(input.get("correlation_id"), row.get("correlation_id"))) continue;
+            String id = (String) input.get("line_message_id");
+            paired.putIfAbsent(id, new PrivateHistory.Turn(id, (String) input.get("correlation_id"),
+                    text(input.get("content")), text(row.get("content")), ((Timestamp) input.get("created_at")).toInstant(),
+                    ((Timestamp) input.get("received_at")).toInstant(), ((Number) input.get("received_sequence")).longValue()));
+        }
+        var turns = new java.util.ArrayList<>(paired.values());
+        turns.sort(java.util.Comparator.comparing(PrivateHistory.Turn::receivedAt).thenComparingLong(PrivateHistory.Turn::sequence));
+        return new PrivateHistory(List.copyOf(turns), last);
+    }
+
+    private String text(Object content) {
+        try { return mapper.readTree(content.toString()).path("text").asText(); }
+        catch (JsonProcessingException failure) { throw new IllegalStateException("Invalid stored conversation content", failure); }
+    }
+
+    PrivateHistory.InputTime lastPrivateInbound(String user,String currentId,Instant received,long sequence) {
+        var times=jdbc.query("""
+                SELECT created_at,received_at,received_sequence FROM chat_message WHERE user_id=? AND source_type='USER'
+                AND conversation_id=? AND direction='INBOUND' AND line_message_id<>?
+                AND (received_at < ? OR (received_at = ? AND received_sequence < ?))
+                ORDER BY received_at DESC,received_sequence DESC,id DESC LIMIT 1
+                """,(row,index) -> new PrivateHistory.InputTime(row.getTimestamp(1).toInstant(),row.getTimestamp(2).toInstant(),row.getLong(3)),user,user,currentId,Timestamp.from(received),Timestamp.from(received),sequence);
+        return times.isEmpty()?null:times.get(0);
+    }
+
     List<ChatMessage> findRecent(String userId, int limit) {
         // 先选最新 N 条，再按时间正序返回，供后续模块按对话顺序构建上下文。
         return jdbc.query("""

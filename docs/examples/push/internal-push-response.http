@@ -1,4 +1,6 @@
 # 全部内容为虚构模拟数据；retryKey 和 trace_id 由真实服务分别生成。
+# 成功推送的 audit_log 表行见同目录 audit-log.json；用此响应的 trace_id 关联实际审计。
+# 审计包含稳定操作者 internal-token、直接来源地址、完整目标用户与文本；不保存鉴权凭证。
 HTTP/1.1 200 OK
 Content-Type: application/json
 X-Trace-Id: 33333333-3333-4333-8333-333333333333

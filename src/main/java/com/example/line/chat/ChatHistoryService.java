@@ -4,7 +4,7 @@ import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
-/** 查询最近消息并以时间正序返回，供后续上下文模块使用，本阶段不接入 AI。 */
+/** 提供通用历史及 AI 私聊配对快照；PostgreSQL 是持久化权威来源。 */
 @Service
 @EnableConfigurationProperties(ChatProperties.class)
 public class ChatHistoryService {
@@ -34,5 +34,35 @@ public class ChatHistoryService {
             throw new IllegalArgumentException("Invalid userId or chat history limit");
         }
         return List.copyOf(repository.findRecent(userId, limit));
+    }
+
+    /**
+     * 查询快照之前的有界私聊历史，关联配对并排除旧未知来源、当前和后续消息。
+     * @param userId 完整私聊用户
+     * @param currentId 当前入站消息 ID
+     * @param receivedAt 当前接收时间
+     * @param sequence 同时刻接收顺序
+     * @param scanLimit 最多扫描条数，不代表轮数
+     * @return 完整轮次与上一条已知私聊入站时间
+     * @throws IllegalArgumentException 查询边界无效时抛出
+     * @throws org.springframework.dao.DataAccessException 读取失败时抛出
+     */
+    public PrivateHistory findPrivate(String userId, String currentId, java.time.Instant receivedAt, long sequence, int scanLimit) {
+        if (userId == null || userId.isBlank() || currentId == null || receivedAt == null || scanLimit < 1 || scanLimit > 1000)
+            throw new IllegalArgumentException("Invalid private history boundary");
+        return repository.privateHistory(userId, currentId, receivedAt, sequence, scanLimit);
+    }
+
+    /**
+     * 查询当前边界之前最近的私聊入站时间，包含非文本与未形成正常轮次的消息。
+     * @param userId 完整私聊用户
+     * @param currentId 当前消息 ID
+     * @param receivedAt 接收边界
+     * @param sequence 接收序号
+     * @return 最近时间，无历史时为 null
+     * @throws org.springframework.dao.DataAccessException 数据库查询失败时抛出
+     */
+    public PrivateHistory.InputTime lastPrivateInbound(String userId,String currentId,java.time.Instant receivedAt,long sequence) {
+        return repository.lastPrivateInbound(userId,currentId,receivedAt,sequence);
     }
 }

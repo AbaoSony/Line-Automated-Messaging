@@ -1,0 +1,30 @@
+{
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "ts": "2026-10-15T04:00:00Z",
+  "event": "user.message.received",
+  "level": "INFO",
+  "trace_id": "11111111-1111-4111-8111-111111111111",
+  "webhook_event_id": "01K7B1N0000000000000000001",
+  "user_id": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcome": "SUCCESS",
+  "duration_ms": null,
+  "http_status": null,
+  "error_type": null,
+  "message_type": "TEXT",
+  "model": null,
+  "input_tokens": null,
+  "output_tokens": null,
+  "detail": {
+    "message_id": "537629183902001",
+    "text_length": 23,
+    "content": {
+      "type": "text",
+      "id": "537629183902001",
+      "text": "你好，我想查询订单 A202610130001"
+    }
+  },
+  "service": "line-messaging-service",
+  "env": "local",
+  "version": "0.0.1-SNAPSHOT",
+  "instance": "fictional-instance"
+}

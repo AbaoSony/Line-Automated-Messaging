@@ -20,6 +20,27 @@ import static org.mockito.Mockito.*;
 
 /** 验证 Reply/Push 请求构造、单次消息限制和 Push 重试幂等。 */
 class LineMessageServiceTest {
+    @Test void deletionWaitsForInFlightPushAndRejectsNewPushUntilUnblocked() throws Exception {
+        var tracker=new com.example.line.common.execution.UserWorkTracker();
+        var client=mock(MessagingApiClient.class);
+        var accepted=new CompletableFuture<com.linecorp.bot.client.base.Result<com.linecorp.bot.messaging.model.PushMessageResponse>>();
+        var entered=new java.util.concurrent.CountDownLatch(1);
+        when(client.pushMessage(any(),any())).thenAnswer(call -> {entered.countDown();return accepted;});
+        var service=new LineMessageService(client,new LineApiCaller(new LineSendProperties(1,Duration.ofSeconds(1),Duration.ofMillis(1))),tracker);
+        String user="U"+"b".repeat(32);
+        var worker=java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var sending=worker.submit(() -> service.pushText(user,"完整虚构推送"));
+            assertThat(entered.await(1,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            try(var barrier=tracker.block(user)) {
+                assertThatThrownBy(() -> barrier.await(Duration.ofMillis(1))).hasMessageContaining("timed out");
+                assertThatThrownBy(() -> service.pushText(user,"删除期间不得发送")).isInstanceOf(LineSendException.class);
+                accepted.complete(null);sending.get(1,java.util.concurrent.TimeUnit.SECONDS);
+                barrier.await(Duration.ofSeconds(1));
+            }
+            service.pushText(user,"解除屏障后新推送");verify(client,times(2)).pushMessage(any(),any());
+        }finally{accepted.complete(null);worker.shutdownNow();}
+    }
     @Test
     // 场景：文本 Reply 传递当前 Token 和原始文本。
     void sendsSdkTextReplyWithOriginalToken() throws Exception {

@@ -1,0 +1,12 @@
+{
+  "text": "你好，我想查询订单 A202610130001",
+  "model_name": "gpt-6.1-sol",
+  "input_tokens": 10,
+  "output_tokens": 10,
+  "latency_ms": 1,
+  "reply_kind": "AI",
+  "source_type": "USER",
+  "conversation_id": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "in_reply_to_message_id": "537629183902001",
+  "correlation_id": "01K7B1N0000000000000000001"
+}

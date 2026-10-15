@@ -22,4 +22,13 @@ public interface EventHandler<E extends Event> {
      * @throws Exception 业务执行或发送失败时向 WebhookService 传播，便于释放幂等占用
      */
     void handle(E event) throws Exception;
+    /**
+     * 异步处理终态决定幂等占用的完成，默认适配既有同步 Handler。
+     * @param event 当前事件
+     * @return 业务处理完成阶段
+     * @throws Exception 同步准备失败时抛出
+     */
+    default java.util.concurrent.CompletionStage<Void> handleAsync(E event) throws Exception {
+        handle(event);return java.util.concurrent.CompletableFuture.completedFuture(null);
+    }
 }

@@ -2,7 +2,7 @@ package com.example.line.common.persistence;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** 保存业务数据库连接配置，供 DatabaseConfig 装配连接池；不生成包含凭证的字符串表示。 */
+/** 保存外部数据库连接配置，供业务池与独立日志池装配复用；不生成包含凭证的字符串表示。 */
 @ConfigurationProperties("line.database")
 public final class DatabaseProperties {
     private final String url;
