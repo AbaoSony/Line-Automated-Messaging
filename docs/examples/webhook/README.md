@@ -1,8 +1,8 @@
 # P0 步骤 1 入站与持久化验证
 
 本文和所链接的 JSON 全部是虚构模拟数据，不包含真实用户或真实凭证。
-已实现持久化验证复用现有完整 [文本请求](../webhook-text.json)、[重投递请求](../webhook-redelivery.json)、
-[关注请求](../webhook-follow.json)、[取消关注请求](../webhook-unfollow.json) 和 [hello 请求](../webhook-hello.json)。
+已实现持久化验证复用现有完整 [文本请求](./webhook-text.json)、[重投递请求](./webhook-redelivery.json)、
+[关注请求](./webhook-follow.json)、[取消关注请求](./webhook-unfollow.json) 和 [hello 请求](./webhook-hello.json)。
 JSON 字段和 HTTP 请求响应没有改变，不新增虚构的数据库连接地址/账号/密码示例。
 
 1. 启动 Docker Engine，在仓库根目录执行 `mvn clean test`。

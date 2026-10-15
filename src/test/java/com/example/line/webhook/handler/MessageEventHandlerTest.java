@@ -81,6 +81,6 @@ class MessageEventHandlerTest {
 
     private MessageEvent event(String sample) throws IOException {
         return (MessageEvent) ModelObjectMapper.createNewObjectMapper().readValue(
-                Files.readAllBytes(Path.of("docs/examples/webhook-" + sample + ".json")), CallbackRequest.class).events().get(0);
+                Files.readAllBytes(Path.of("docs/examples/webhook/webhook-" + sample + ".json")), CallbackRequest.class).events().get(0);
     }
 }

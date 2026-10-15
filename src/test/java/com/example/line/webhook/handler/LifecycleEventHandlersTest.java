@@ -50,6 +50,6 @@ class LifecycleEventHandlersTest {
 
     private Event event(String sample) throws IOException {
         return ModelObjectMapper.createNewObjectMapper().readValue(
-                Files.readAllBytes(Path.of("docs/examples/webhook-" + sample + ".json")), CallbackRequest.class).events().get(0);
+                Files.readAllBytes(Path.of("docs/examples/webhook/webhook-" + sample + ".json")), CallbackRequest.class).events().get(0);
     }
 }

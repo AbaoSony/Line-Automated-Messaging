@@ -22,7 +22,7 @@ class LineMessagesTest {
                 LineMessages.flexCard("订单通知", "订单 A202610130001 已发货"),
                 LineMessages.quickReply("请选择操作", List.of(new LineMessages.QuickOption("查询订单", "查询订单"))));
         var mapper = ModelObjectMapper.createNewObjectMapper();
-        var expected = mapper.readTree(Files.readAllBytes(Path.of("docs/examples/push-five-messages-request.json")));
+        var expected = mapper.readTree(Files.readAllBytes(Path.of("docs/examples/push/push-five-messages-request.json")));
         var actual = mapper.valueToTree(new PushMessageRequest.Builder("U" + "a".repeat(32), messages).build());
         assertThat(actual).isEqualTo(expected);
     }

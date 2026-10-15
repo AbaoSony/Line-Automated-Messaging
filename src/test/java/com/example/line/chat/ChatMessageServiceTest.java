@@ -65,6 +65,6 @@ class ChatMessageServiceTest {
 
     private MessageEvent event() throws Exception {
         return (MessageEvent) ModelObjectMapper.createNewObjectMapper().readValue(
-                Files.readAllBytes(Path.of("docs/examples/webhook-hello.json")), CallbackRequest.class).events().get(0);
+                Files.readAllBytes(Path.of("docs/examples/webhook/webhook-hello.json")), CallbackRequest.class).events().get(0);
     }
 }

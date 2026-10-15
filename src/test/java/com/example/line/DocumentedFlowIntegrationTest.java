@@ -65,7 +65,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     // 场景：完整验证验签、echo、事件去重、四类兜底、内容下载、Push 同 Key 重试与已接受冲突。
     @Test
     void documentedInboundAndOutboundDataMatchTheActualHttpFlow(CapturedOutput logs) throws Exception {
-        byte[] text = Files.readAllBytes(EXAMPLES.resolve("webhook-text.json"));
+        byte[] text = Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-text.json"));
         assertThat(send(text, false).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(stub.replies).isEmpty();
 
@@ -74,7 +74,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(capture).isNotNull();
         assertThat(capture.method()).isEqualTo("POST");
         assertThat(capture.authorization()).isEqualTo("Bearer documentation-test-token");
-        assertThat(capture.body()).isEqualTo(readJson("reply-text-request.json"));
+        assertThat(capture.body()).isEqualTo(readJson("reply/reply-text-request.json"));
         awaitWorkers();
         awaitPersistence();
         JsonNode textEvent = mapper.readTree(text).path("events").get(0);
@@ -92,7 +92,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(row.content().path("text").asText()).isEqualTo(textEvent.path("message").path("text").asText());
         });
 
-        assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook-redelivery.json")), true)
+        assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-redelivery.json")), true)
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         awaitWorkers();
         awaitPersistence();
@@ -101,7 +101,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                 && textEvent.path("message").path("id").asText().equals(row.lineMessageId())).hasSize(1);
 
         for (String name : List.of("image", "sticker", "location", "file")) {
-            byte[] body = Files.readAllBytes(EXAMPLES.resolve("webhook-" + name + ".json"));
+            byte[] body = Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-" + name + ".json"));
             assertThat(send(body, true).getStatusCode()).isEqualTo(HttpStatus.OK);
             capture = stub.replies.poll(5, TimeUnit.SECONDS);
             assertThat(capture).isNotNull();
@@ -109,11 +109,11 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(capture.body().path("replyToken").asText()).isEqualTo(incoming.path("replyToken").asText());
             assertThat(capture.body().path("messages").get(0).path("text").asText()).isEqualTo("暂不支持");
             if (name.equals("image")) {
-                assertThat(capture.body()).isEqualTo(readJson("reply-image-request.json"));
+                assertThat(capture.body()).isEqualTo(readJson("reply/reply-image-request.json"));
             }
         }
         for (String name : List.of("follow", "unfollow", "postback", "empty")) {
-            assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook-" + name + ".json")), true)
+            assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-" + name + ".json")), true)
                     .getStatusCode()).isEqualTo(HttpStatus.OK);
         }
         awaitWorkers();
@@ -126,17 +126,17 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(stub.contentAuthorization.get()).isEqualTo("Bearer documentation-test-token");
         assertThat(stub.contentPath.get()).isEqualTo("/v2/bot/message/537629183902005/content");
 
-        assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook-hello.json")), true)
+        assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-hello.json")), true)
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         capture = stub.replies.poll(5, TimeUnit.SECONDS);
         assertThat(capture).isNotNull();
-        assertThat(capture.body()).isEqualTo(readJson("reply-hello-request.json"));
+        assertThat(capture.body()).isEqualTo(readJson("reply/reply-hello-request.json"));
 
         stub.pushStatuses.addAll(List.of(503, 200));
         var headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Internal-Token", "documentation-internal-token");
-        var pushRequest = new HttpEntity<>(Files.readAllBytes(EXAMPLES.resolve("internal-push-request.json")), headers);
+        var pushRequest = new HttpEntity<>(Files.readAllBytes(EXAMPLES.resolve("push/internal-push-request.json")), headers);
         var pushResponse = http.postForEntity("/internal/push", pushRequest, String.class);
         assertThat(pushResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         PushCapture failedPush = stub.pushes.poll(5, TimeUnit.SECONDS);
@@ -146,7 +146,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(acceptedPush.retryKey()).isEqualTo(failedPush.retryKey());
         assertThat(java.util.UUID.fromString(acceptedPush.retryKey())).isNotNull();
         assertThat(acceptedPush.authorization()).isEqualTo("Bearer documentation-test-token");
-        assertThat(failedPush.body()).isEqualTo(readJson("push-text-request.json")).isEqualTo(acceptedPush.body());
+        assertThat(failedPush.body()).isEqualTo(readJson("push/push-text-request.json")).isEqualTo(acceptedPush.body());
         assertThat(mapper.readTree(pushResponse.getBody()).path("retryKey").asText()).isEqualTo(acceptedPush.retryKey());
 
         stub.pushStatuses.add(409);
@@ -230,7 +230,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                     Integer plannedStatus = pushStatuses.poll();
                     int status = plannedStatus == null ? 200 : plannedStatus;
                     byte[] response = status == 200
-                            ? Files.readAllBytes(EXAMPLES.resolve("reply-success-response.json"))
+                            ? Files.readAllBytes(EXAMPLES.resolve("reply/reply-success-response.json"))
                             : "{\"message\":\"simulated upstream failure\"}".getBytes(StandardCharsets.UTF_8);
                     exchange.getResponseHeaders().set("Content-Type", "application/json");
                     if (status == 409) exchange.getResponseHeaders().set("X-Line-Accepted-Request-Id", "accepted-request");
@@ -241,7 +241,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             server.createContext("/v2/bot/message/reply", exchange -> {
                 try {
                     var body = new ObjectMapper().readTree(exchange.getRequestBody());
-                    byte[] response = Files.readAllBytes(EXAMPLES.resolve("reply-success-response.json"));
+                    byte[] response = Files.readAllBytes(EXAMPLES.resolve("reply/reply-success-response.json"));
                     exchange.getResponseHeaders().set("Content-Type", "application/json");
                     exchange.getResponseHeaders().set("X-Line-Request-Id", "mock-request-id");
                     exchange.sendResponseHeaders(200, response.length);
