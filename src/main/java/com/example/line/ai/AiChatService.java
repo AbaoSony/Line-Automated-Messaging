@@ -150,7 +150,7 @@ public class AiChatService {
                 dependencyFailure("read_or_lock",failure);
                 kind="SERVICE_UNAVAILABLE";text=properties.unavailable();
             }
-            if(kind.equals("FALLBACK")) {
+            if(kind.equals("FALLBACK") && properties.technicalRepliesEnabled()) {
                 meters.counter("ai.fallback.attempted").increment();
                 BusinessLog.write(LoggerFactory.getLogger(getClass()),Level.WARN,LogEvents.AI_FALLBACK_USED,"AI fallback attempted",
                         BusinessLog.fields("reply_kind",kind,"content",Map.of("text",text),"outcome","SKIPPED"));
@@ -163,6 +163,11 @@ public class AiChatService {
         }
     }
     private void deliver(AiInput input,String replyToken,Deadline deadline,String owner,String text,String kind,ChatResult result,PrivateHistory snapshot) {
+        // 技术故障与拒绝只保留可观测记录，不能把静默处理伪造为已发送或进入正常上下文。
+        if(!kind.equals("AI") && !properties.technicalRepliesEnabled()) {
+            skipped("technical_replies_disabled",kind);
+            return;
+        }
         if(tracker.blocked(input.userId()) || !deadline.permits(Duration.ZERO)) {skipped("deadline_or_deletion");return;}
         if(owner!=null) {
             try {if(!coordination.owns(input.userId(),owner)){skipped("lock_lost");return;}}
@@ -198,8 +203,11 @@ public class AiChatService {
                 BusinessLog.fields("stage",stage,"outcome","FAILED"));
     }
     private void skipped(String reason) {
+        skipped(reason,null);
+    }
+    private void skipped(String reason,String kind) {
         meters.counter("ai.reply.skipped","reason",reason).increment();
         BusinessLog.write(LoggerFactory.getLogger(getClass()),Level.WARN,LogEvents.AI_REPLY_SKIPPED,"AI reply skipped",
-                BusinessLog.fields("reason",reason,"outcome","SKIPPED"));
+                BusinessLog.fields("reason",reason,"reply_kind",kind,"outcome","SKIPPED"));
     }
 }

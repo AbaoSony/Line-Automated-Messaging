@@ -83,6 +83,12 @@ IDEA/Maven 如果配置过旧 AI_* 环境变量，按接口文档 2.5 更新并�
 
 [ai-generation-incomplete.json](ai-generation-incomplete.json) 是完整虚构的生成事件业务字段，不是 Webhook 请求。该样例特意复现旧 1024 输出额度场景，当前默认已为 4096；空正文、INCOMPLETE、incomplete_reason=max_output_tokens、reasoning_tokens=1024 表示虚构响应把旧输出预算用于推理；content_filter 等其他原因独立保留，不猜测所有未完成都是超时。
 
-AiFlowIntegrationTest 比较该 JSON 的固定业务字段，验证用量留在失败事件、FALLBACK 出站不伪造模型用量，空白结果不进入上下文，凭证仍禁记。OpenAiAdapterTest 使用本地 HTTP Stub 验证官方 SDK 的未完成原因/推理用量映射、未知明细为空，以及默认 max_output_tokens=4096 不要求实际生成满额。
+AiFlowIntegrationTest 比较该 JSON 的固定业务字段，验证用量留在失败事件、显式开启时的 FALLBACK 出站不伪造模型用量，默认静默不写出站，空白结果不进入上下文，凭证仍禁记。OpenAiAdapterTest 使用本地 HTTP Stub 验证官方 SDK 的未完成原因/推理用量映射、未知明细为空，以及默认 max_output_tokens=4096 不要求实际生成满额。
 
-IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成 4096；模型单次/阶段环境变量同步设 40s，然后重启。在测试 Channel 中先等上一条回复再发送下一条，可以分别验证模型完成情况和同用户排队；连续发送超过 3s 等待仍返回 BUSY，规则未修改。提高额度可能增加实际输出费用，max 推理仍可能超过当前总时限，不能以本地模拟测试代替真实模型验收。
+IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成 4096；模型单次/阶段环境变量同步设 40s，然后重启。在测试 Channel 中先等上一条回复再发送下一条，可以分别验证模型完成情况和同用户排队；连续发送超过 3s 等待仍分类 BUSY，但默认静默，不发送忙碌话术。提高额度可能增加实际输出费用，max 推理仍可能超过当前总时限，不能以本地模拟测试代替真实模型验收。
+
+### 技术提示统一静默（已实现）
+
+默认 AI_TECHNICAL_REPLIES_ENABLED=false，生成失败、忙碌、限流、服务故障、输入过长不发提示；正常 AI 回复照常发送。原始入站/错误日志保留，静默任务不生成成功出站、不进正常上下文、不自动补答，去重仍完成。需要恢复提示时显式设 true 并重启。
+
+[完整虚构入站](webhook-silent-technical.json) 与 [静默事件行](ai-reply-skipped.json) 由 DocumentedFlowIntegrationTest 对比实际数据库结果；故意模拟模型超时，确认 HTTP 200、保留原文、无 Reply、重投递不补发。AiFlowIntegrationTest 保留开启模式的原有严格出站断言，另测关闭模式下全部分类、队列满/过期、锁等待、正常在途任务继续完成，以及失败指标和事件没有丢失。示例中的 UUID、用户、凭证和消息均为虚构。

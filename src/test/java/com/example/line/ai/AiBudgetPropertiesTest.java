@@ -16,11 +16,19 @@ class AiBudgetPropertiesTest {
         var model=binder.bindOrCreate("line.ai.model",ModelProperties.class);
         assertThat(ai.totalTimeout()).isEqualTo(Duration.ofSeconds(45));
         assertThat(ai.sendReserve()).isEqualTo(Duration.ofSeconds(3));
+        assertThat(ai.technicalRepliesEnabled()).isFalse();
         assertThat(model.totalTimeout()).isEqualTo(Duration.ofSeconds(40));
         assertThat(model.attemptTimeout()).isEqualTo(Duration.ofSeconds(40));
         assertThat(model.maxOutputTokens()).isEqualTo(4096);
         assertThat(model.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
         assertThat(model.totalTimeout().plus(ai.sendReserve())).isLessThan(ai.totalTimeout());
+    }
+
+    @Test void technicalRepliesCanBeExplicitlyEnabledWithoutChangingGenerationBudget() {
+        var env=new MockEnvironment().withProperty("line.ai.technical-replies-enabled","true");
+        var properties=Binder.get(env).bindOrCreate("line.ai",AiProperties.class);
+        assertThat(properties.technicalRepliesEnabled()).isTrue();
+        assertThat(properties.totalTimeout()).isEqualTo(Duration.ofSeconds(45));
     }
 
     @Test void totalBudgetCanReach50SecondsButRejectsLargerValues() {

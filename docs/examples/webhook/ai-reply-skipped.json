@@ -1,0 +1,22 @@
+{
+  "id": "55555555-5555-4555-8555-555555555555",
+  "ts": "2026-10-15T09:00:00Z",
+  "event": "ai.reply.skipped",
+  "level": "WARN",
+  "trace_id": "66666666-6666-4666-8666-666666666666",
+  "webhook_event_id": "fictional-silent-document-event",
+  "user_id": "Ucccccccccccccccccccccccccccccccc",
+  "outcome": "SKIPPED",
+  "duration_ms": null,
+  "http_status": null,
+  "error_type": null,
+  "message_type": null,
+  "model": null,
+  "input_tokens": null,
+  "output_tokens": null,
+  "detail": { "reason": "technical_replies_disabled", "reply_kind": "FALLBACK" },
+  "service": "line-messaging-service",
+  "env": "local",
+  "version": "0.0.1-SNAPSHOT",
+  "instance": "fictional-instance"
+}

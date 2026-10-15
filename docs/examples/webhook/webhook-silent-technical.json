@@ -1,0 +1,20 @@
+{
+  "destination": "Ubbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "events": [
+    {
+      "type": "message",
+      "webhookEventId": "fictional-silent-document-event",
+      "timestamp": 1792054800000,
+      "mode": "active",
+      "deliveryContext": { "isRedelivery": false },
+      "source": { "type": "user", "userId": "Ucccccccccccccccccccccccccccccccc" },
+      "replyToken": "fictional-silent-document-reply-token",
+      "message": {
+        "type": "text",
+        "id": "fictional-silent-document-message",
+        "text": "完整虛構靜默測試訊息",
+        "quoteToken": "fictional-silent-document-quote-token"
+      }
+    }
+  ]
+}

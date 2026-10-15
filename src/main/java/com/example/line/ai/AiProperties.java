@@ -19,7 +19,8 @@ public record AiProperties(@DefaultValue("45s") Duration totalTimeout,
                            @DefaultValue("我還在處理上一則訊息，稍等一下再傳喔。") String busy,
                            @DefaultValue("訊息有點多，稍等一下再聊喔。") String rateLimited,
                            @DefaultValue("服務暫時開小差了，晚點再試一下喔。") String unavailable,
-                           @DefaultValue("這則訊息有點長，可以分短一點說嗎？") String inputTooLong) {
+                           @DefaultValue("這則訊息有點長，可以分短一點說嗎？") String inputTooLong,
+                           @DefaultValue("false") boolean technicalRepliesEnabled) {
     // 保留 LINE 短效 Reply 的网络余量，不能通过配置变成分钟级延迟任务。
     private static final Duration MAX_TOTAL_TIMEOUT=Duration.ofSeconds(50);
     /**

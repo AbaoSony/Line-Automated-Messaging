@@ -221,6 +221,27 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(meters.get("webhook.signature.failed").counter().count()).isEqualTo(1);
         assertThat(meters.get("webhook.dedup.hits").counter().count()).isEqualTo(1);
         assertThat(meters.get("line.push.failed").counter().count()).isZero();
+
+        // 静默仍完成当前事件，保留完整入站和失败依据，不把未发送提示写成成功出站。
+        org.mockito.Mockito.doThrow(new com.example.line.ai.generation.ModelFailure("timeout")).when(testModel).generate(org.mockito.ArgumentMatchers.any());
+        byte[] silent=Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-silent-technical.json"));
+        var silentResponse=send(silent,true);assertThat(silentResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        awaitWorkers();awaitPersistence();await().atMost(Duration.ofSeconds(5)).until(eventRecorder::isIdle);
+        var skippedExample=readJson("webhook/ai-reply-skipped.json");
+        var skipped=jdbc.queryForMap("SELECT * FROM event_log WHERE trace_id=? AND event='ai.reply.skipped'",silentResponse.getHeaders().getFirst("X-Trace-Id"));
+        for(String column:List.of("event","level","webhook_event_id","user_id","outcome"))
+            assertThat(skipped.get(column)).isEqualTo(skippedExample.path(column).asText());
+        assertThat(mapper.readTree(skipped.get("detail").toString())).isEqualTo(skippedExample.path("detail"));
+        assertThat(stub.replies).isEmpty();
+        var silentEvent=mapper.readTree(silent).path("events").get(0);
+        var silentHistory=chatHistory.findRecent(silentEvent.path("source").path("userId").asText(),100);
+        assertThat(silentHistory).singleElement().satisfies(row -> {
+            assertThat(row.direction()).isEqualTo("INBOUND");
+            assertThat(row.content().path("text")).isEqualTo(silentEvent.path("message").path("text"));
+        });
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE trace_id=? AND event='ai.generate.failed'",Integer.class,silentResponse.getHeaders().getFirst("X-Trace-Id"))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE trace_id=? AND event='ai.fallback.used'",Integer.class,silentResponse.getHeaders().getFirst("X-Trace-Id"))).isZero();
+        assertThat(send(silent,true).getStatusCode()).isEqualTo(HttpStatus.OK);awaitWorkers();assertThat(stub.replies).isEmpty();
     }
 
     private ResponseEntity<String> send(byte[] body, boolean correctSignature) throws Exception {

@@ -39,6 +39,7 @@ services:
       AI_QUEUE_CAPACITY: ${AI_QUEUE_CAPACITY:-256}
       AI_USER_QUEUE_CAPACITY: ${AI_USER_QUEUE_CAPACITY:-3}
       AI_MAX_USERS: ${AI_MAX_USERS:-1024}
+      AI_TECHNICAL_REPLIES_ENABLED: ${AI_TECHNICAL_REPLIES_ENABLED:-false}
       AI_FALLBACK: ${AI_FALLBACK:-剛剛沒能順利回覆，可以再說一次嗎？}
       AI_BUSY: ${AI_BUSY:-我還在處理上一則訊息，稍等一下再傳喔。}
       AI_RATE_LIMITED: ${AI_RATE_LIMITED:-訊息有點多，稍等一下再聊喔。}

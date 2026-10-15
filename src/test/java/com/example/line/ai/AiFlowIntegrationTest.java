@@ -36,7 +36,8 @@ import static org.mockito.Mockito.*;
 
 /** 用完整虚构 HTTP 私聊验证 AI、角色历史、分类出站、故障隔离、凭证禁记和并发删除屏障。 */
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
-        "line.bot.channel-secret=fake-ai-flow-secret","line.bot.channel-token=fake-ai-flow-token","line.send.attempt-timeout=100ms"})
+        "line.bot.channel-secret=fake-ai-flow-secret","line.bot.channel-token=fake-ai-flow-token","line.send.attempt-timeout=100ms",
+        "line.ai.technical-replies-enabled=true"})
 @ExtendWith(OutputCaptureExtension.class)
 class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private TestRestTemplate http;
@@ -51,6 +52,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private MemoryProperties memoryProperties;
     @Autowired private UserDataDeletionService deletion;
     @Autowired private UserWorkTracker tracker;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
     @MockitoBean private MessagingApiClient line;
     @MockitoSpyBean private RedisConversationMemory memory;
     @MockitoSpyBean private AiProperties aiProperties;
@@ -58,6 +60,63 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     private String user(){return "U"+UUID.randomUUID().toString().replace("-","");}
     private String key(String user,String suffix){return memoryProperties.namespace()+":{"+user+"}:"+suffix;}
     private ChatResult result(String text){return new ChatResult(text,"gpt-6.1-sol",123,45,7,"COMPLETED");}
+    @ParameterizedTest @ValueSource(strings={"timeout","empty","incomplete","too_long","input_limit","rate","dependency","lock"})
+    void disabledTechnicalRepliesKeepInboundAndFailureEventsWithoutSendingOrRetrying(String scenario) throws Exception {
+        doReturn(false).when(aiProperties).technicalRepliesEnabled();
+        String user=user(),id="fictional-silent-"+scenario;
+        String text=scenario.equals("input_limit")?"訊".repeat(4000):"完整虛構入站";
+        switch(scenario) {
+            case "timeout" -> doThrow(new ModelFailure("timeout")).when(testModel).generate(any());
+            case "empty" -> doReturn(result(" ")).when(testModel).generate(any());
+            case "incomplete" -> doReturn(new ChatResult("未完成虛構內容","gpt-6-astra",100,1024,25,"INCOMPLETE","max_output_tokens",1024)).when(testModel).generate(any());
+            case "too_long" -> doReturn(result("虛".repeat(5001))).when(testModel).generate(any());
+            case "rate" -> redis.opsForValue().set(key(user,"rate"),"12",Duration.ofSeconds(60));
+            case "dependency" -> doThrow(new IllegalStateException("fake-private-redis-password")).when(memory).load(eq(user),any(),any(),anyLong(),any(),any());
+            case "lock" -> redis.opsForValue().set(key(user,"lock"),"fictional-foreign-owner",Duration.ofSeconds(5));
+            default -> { }
+        }
+        double attempts=meters.find("ai.fallback.attempted").counter()==null?0:meters.get("ai.fallback.attempted").counter().count();
+        var response=send(user,id,text,"user","active");drain();
+        send(user,id,text,"user","active");drain();
+        verifyNoInteractions(line);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isZero();
+        assertThat(jdbc.queryForObject("SELECT content->>'text' FROM chat_message WHERE user_id=? AND direction='INBOUND'",String.class,user)).isEqualTo(text);
+        String kind=switch(scenario){case "input_limit"->"INPUT_TOO_LONG";case "rate"->"RATE_LIMITED";case "dependency"->"SERVICE_UNAVAILABLE";case "lock"->"BUSY";default->"FALLBACK";};
+        var detail=mapper.readTree(jdbc.queryForObject("SELECT detail::text FROM event_log WHERE trace_id=? AND event='ai.reply.skipped'",String.class,response.getHeaders().getFirst("X-Trace-Id")));
+        assertThat(detail.path("reason").asText()).isEqualTo("technical_replies_disabled");
+        assertThat(detail.path("reply_kind").asText()).isEqualTo(kind);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event='ai.fallback.used'",Integer.class,user)).isZero();
+        String failureEvent=switch(kind){case "FALLBACK"->"ai.generate.failed";case "RATE_LIMITED"->"user.rate_limited";case "SERVICE_UNAVAILABLE"->"ai.dependency.failed";case "BUSY"->"lock.timeout";default->null;};
+        if(failureEvent!=null)assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event=?",Integer.class,user,failureEvent)).isEqualTo(1);
+        assertThat(meters.find("ai.fallback.attempted").counter()==null?0:meters.get("ai.fallback.attempted").counter().count()).isEqualTo(attempts);
+        if(kind.equals("FALLBACK"))verify(testModel).generate(any());else verifyNoInteractions(testModel);
+        String cached=redis.opsForValue().get(key(user,"context"));
+        if(cached!=null)assertThat(mapper.readTree(cached).path("turns")).isEmpty();
+    }
+
+    @ParameterizedTest @ValueSource(strings={"expired","full"})
+    void silentQueueRejectionPreservesEarlierWorkAndDoesNotConsumeRejectedReplyToken(String scenario) throws Exception {
+        doReturn(false).when(aiProperties).technicalRepliesEnabled();
+        doReturn(scenario.equals("expired")?Duration.ofMillis(50):Duration.ofSeconds(2)).when(aiProperties).queueWait();
+        doReturn(1).when(aiProperties).userQueueCapacity();
+        String user=user(),prefix="fictional-queue-silent-"+scenario;
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
+        doAnswer(call -> {entered.countDown();assertThat(release.await(3,TimeUnit.SECONDS)).isTrue();return result("正常虛構回覆");}).when(testModel).generate(any());
+        try {
+            send(user,prefix+"-first","第一則","user","active");assertThat(entered.await(2,TimeUnit.SECONDS)).isTrue();
+            send(user,prefix+"-second","第二則","user","active");
+            String rejected=prefix+"-second";
+            if(scenario.equals("full")){rejected=prefix+"-third";send(user,rejected,"第三則","user","active");}
+            final String rejectedId=rejected;
+            await().atMost(Duration.ofSeconds(2)).until(() -> jdbc.queryForObject("SELECT count(*) FROM event_log WHERE webhook_event_id=? AND event='ai.reply.skipped'",Integer.class,rejectedId)==1);
+            verifyNoInteractions(line);send(user,rejectedId,"重投遞不得補發","user","active");
+            release.countDown();drain();
+            int accepted=scenario.equals("expired")?1:2;
+            verify(line,times(accepted)).replyMessage(argThat(request -> request.messages().toString().contains("正常虛構回覆")));
+            verify(testModel,times(accepted)).generate(any());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND in_reply_to_message_id=? AND direction='OUTBOUND'",Integer.class,user,rejectedId)).isZero();
+        }finally{release.countDown();}
+    }
     @Test void reasoningExhaustionIsLoggedWithActualUsageButNeverAddedAsSuccessfulAiHistory(CapturedOutput logs) throws Exception {
         String user=user();
         doReturn(new ChatResult("","gpt-6-astra",100,1024,25,"INCOMPLETE","max_output_tokens",1024))

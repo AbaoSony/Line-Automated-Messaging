@@ -44,6 +44,7 @@ line:
     queue-capacity: ${AI_QUEUE_CAPACITY:256}
     user-queue-capacity: ${AI_USER_QUEUE_CAPACITY:3}
     max-users: ${AI_MAX_USERS:1024}
+    technical-replies-enabled: ${AI_TECHNICAL_REPLIES_ENABLED:false}
     fallback: ${AI_FALLBACK:剛剛沒能順利回覆，可以再說一次嗎？}
     busy: ${AI_BUSY:我還在處理上一則訊息，稍等一下再傳喔。}
     rate-limited: ${AI_RATE_LIMITED:訊息有點多，稍等一下再聊喔。}

@@ -163,3 +163,5 @@ ai/          私聊 AI 编排，generation/、memory/、coordination/ 分别隔�
 3. HTTP 接收起统一截止预算默认 45 秒、配置上限 50 秒，预留发送 3 秒；短效 Reply Token 只保留在当前有界内存任务中，不写入数据库、Redis、日志或恢复任务。Reply 结果未知时不得补发兜底或改 Push。
 4. 上下文只纳入明确关联、已获 LINE 接受的正常 AI 私聊完整轮次；来源未知旧数据完整保留但不进入模型。提示和生成失败不得污染上下文。
 5. PostgreSQL/Redis 测试使用 Testcontainers 临时容器；OpenAI 用 mock 或本地 HTTP Stub，禁止真实模型调用。完整允许业务上下文和输出按日志规范记录，凭证禁记。
+
+6. AI 技术提示默认统一静默（AI_TECHNICAL_REPLIES_ENABLED=false），包含生成失败、忙碌、限流、服务故障和输入过长；保留完整入站与错误记录，不伪造成功出站/兜底尝试，不自动补发。正常 AI 回复继续发送；显式启用开关才恢复配置话术。
