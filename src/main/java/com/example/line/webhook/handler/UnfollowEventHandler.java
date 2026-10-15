@@ -2,8 +2,11 @@ package com.example.line.webhook.handler;
 
 import com.linecorp.bot.webhook.model.UnfollowEvent;
 import com.example.line.user.UserService;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.stereotype.Component;
 
 /**
@@ -35,7 +38,9 @@ public class UnfollowEventHandler implements EventHandler<UnfollowEvent> {
     public void handle(UnfollowEvent event) {
         users.recordStatus(event.source() == null ? null : event.source().userId(), false, event.timestamp() == null
                 ? java.time.Instant.now() : java.time.Instant.ofEpochMilli(event.timestamp()));
-        log.info("LINE unfollow userId={}, eventId={}",
+        BusinessLog.write(log, Level.INFO, LogEvents.USER_UNFOLLOW, "LINE unfollow userId={}, eventId={}",
+                BusinessLog.fields("user_id", event.source() == null ? null : event.source().userId(),
+                        "webhook_event_id", event.webhookEventId(), "outcome", "SUCCESS"),
                 event.source() == null ? null : event.source().userId(), event.webhookEventId());
     }
 }

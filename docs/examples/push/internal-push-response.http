@@ -1,0 +1,13 @@
+# 全部内容为虚构模拟数据；retryKey 和 trace_id 由真实服务分别生成。
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Trace-Id: 33333333-3333-4333-8333-333333333333
+
+{"status":"ACCEPTED","retryKey":"123e4567-e89b-12d3-a456-426614174000","alreadyAccepted":false}
+
+###
+# 鉴权失败不发送消息；不回显提供的凭证。
+HTTP/1.1 401 Unauthorized
+X-Trace-Id: 44444444-4444-4444-8444-444444444444
+Content-Length: 0
+

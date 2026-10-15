@@ -2,6 +2,11 @@ package com.example.line.webhook;
 
 import com.example.line.webhook.signature.SignatureVerifier;
 import com.example.line.webhook.WebhookService;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 public class WebhookController {
+    private static final Logger log = LoggerFactory.getLogger(WebhookController.class);
     private final SignatureVerifier verifier;
     private final WebhookService webhookService;
 
@@ -40,8 +46,12 @@ public class WebhookController {
     public ResponseEntity<Void> receive(@RequestBody byte[] body,
             @RequestHeader(value = "X-Line-Signature", required = false) String signature) {
         if (!verifier.isValid(body, signature)) {
+            BusinessLog.write(log, Level.WARN, LogEvents.WEBHOOK_SIGNATURE_INVALID, "LINE webhook signature invalid",
+                    BusinessLog.fields("outcome", "FAILED", "http_status", 400));
             return ResponseEntity.badRequest().build();
         }
+        BusinessLog.write(log, Level.INFO, LogEvents.WEBHOOK_RECEIVED, "LINE webhook received",
+                BusinessLog.fields("outcome", "SUCCESS"));
         // 入队拒绝仍沿用快速 200 的既定策略，由接入服务记录；这不是可靠投递保证。
         webhookService.submit(body);
         return ResponseEntity.ok().build();

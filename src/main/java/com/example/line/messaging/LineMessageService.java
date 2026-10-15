@@ -1,5 +1,12 @@
 package com.example.line.messaging;
 
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogContext;
+import com.example.line.common.logging.LogData;
+import com.example.line.common.logging.LogEvents;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import com.linecorp.bot.messaging.client.MessagingApiClient;
 import com.linecorp.bot.messaging.model.ReplyMessageRequest;
 import com.linecorp.bot.messaging.model.Message;
@@ -15,6 +22,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class LineMessageService {
+    private static final Logger log = LoggerFactory.getLogger(LineMessageService.class);
     private final MessagingApiClient client;
     private final LineApiCaller caller;
 
@@ -58,7 +66,11 @@ public class LineMessageService {
             throw new IllegalArgumentException("Missing reply token");
         }
         var request = new ReplyMessageRequest.Builder(replyToken, validateMessages(messages)).build();
+        BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_REQUESTED, "LINE reply requested",
+                BusinessLog.fields("messages", LogData.business(request.messages())));
         caller.execute("reply", null, () -> client.replyMessage(request));
+        BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_SENT, "LINE reply accepted",
+                BusinessLog.fields("outcome", "SUCCESS"));
     }
 
     /**
@@ -91,8 +103,14 @@ public class LineMessageService {
         var request = new PushMessageRequest.Builder(userId, validateMessages(messages)).build();
         // 必须从首次请求就设置 Key，不能等遇到超时后再生成，否则无法去除已执行的重复请求。
         UUID retryKey = UUID.randomUUID();
-        boolean alreadyAccepted = caller.execute("push", retryKey, () -> client.pushMessage(retryKey, request));
-        return new PushReceipt(retryKey, alreadyAccepted);
+        try (var scope = LogContext.user(userId)) {
+            BusinessLog.write(log, Level.INFO, LogEvents.LINE_PUSH_REQUESTED, "LINE push requested",
+                    BusinessLog.fields("messages", LogData.business(request.messages())));
+            boolean alreadyAccepted = caller.execute("push", retryKey, () -> client.pushMessage(retryKey, request));
+            BusinessLog.write(log, Level.INFO, LogEvents.LINE_PUSH_SENT, "LINE push accepted",
+                    BusinessLog.fields("outcome", "SUCCESS"));
+            return new PushReceipt(retryKey, alreadyAccepted);
+        }
     }
 
     private List<Message> validateMessages(List<Message> messages) {

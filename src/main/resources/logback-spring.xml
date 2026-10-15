@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+            <format>${CONSOLE_LOG_STRUCTURED_FORMAT}</format>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+    <springProfile name="local">
+        <springProperty name="READABLE_LOG_FILE" source="line.logging.readable-file" defaultValue="logs/application-readable.log"/>
+        <appender name="LOCAL_READABLE" class="ch.qos.logback.core.FileAppender">
+            <file>${READABLE_LOG_FILE}</file>
+            <append>true</append>
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>com.example.line.common.logging.ReadableLogFormatter</format>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="LOCAL_READABLE"/>
+        </root>
+    </springProfile>
+    <root level="INFO">
+        <appender-ref ref="JSON_STDOUT"/>
+    </root>
+</configuration>

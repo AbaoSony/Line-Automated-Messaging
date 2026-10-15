@@ -2,6 +2,9 @@ package com.example.line.webhook.handler;
 
 import com.example.line.messaging.LineMessageService;
 import com.example.line.chat.ChatMessageService;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogData;
+import com.example.line.common.logging.LogEvents;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.linecorp.bot.jackson.ModelObjectMapper;
@@ -10,6 +13,7 @@ import com.linecorp.bot.webhook.model.MessageEvent;
 import com.linecorp.bot.webhook.model.TextMessageContent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.stereotype.Component;
 
 /**
@@ -60,11 +64,17 @@ public class MessageEventHandler implements EventHandler<MessageEvent> {
         String userId = event.source() == null ? null : event.source().userId();
         JsonNode content = mapper.valueToTree(event.message());
         String messageType = content.path("type").asText("unknown").toUpperCase(java.util.Locale.ROOT);
+        BusinessLog.write(log, Level.INFO, LogEvents.USER_MESSAGE_RECEIVED, "LINE user message received",
+                BusinessLog.fields("user_id", userId, "webhook_event_id", event.webhookEventId(),
+                        "message_type", messageType, "message_id", event.message().id(),
+                        "text_length", event.message() instanceof TextMessageContent text && text.text() != null ? text.text().length() : null,
+                        "content", LogData.business(event.message()), "outcome", "SUCCESS"));
         chat.recordInbound(userId, event.message().id(), messageType, content, event.timestamp() == null
                 ? java.time.Instant.now() : java.time.Instant.ofEpochMilli(event.timestamp()));
         // standby 是 LINE 的非活动 Bot 模式，不能因为有消息内容就直接回复。
         if (event.mode() == EventMode.STANDBY) {
-            log.info("Skipping reply for standby eventId={}", event.webhookEventId());
+            BusinessLog.write(log, Level.INFO, LogEvents.WEBHOOK_EVENT_SKIPPED, "Skipping reply for standby",
+                    BusinessLog.fields("outcome", "SKIPPED", "reason", "standby"));
             return;
         }
         if (event.message() instanceof TextMessageContent text) {
@@ -72,8 +82,9 @@ public class MessageEventHandler implements EventHandler<MessageEvent> {
             chat.recordOutbound(userId, "TEXT", mapper.createObjectNode().put("text", text.text()));
         } else {
             // 仅持久化业务元数据，不自动下载二进制；原事件中的 Reply Token 不得进入落库任务。
-            log.info("Unsupported LINE message type={}, messageId={}, eventId={}",
-                    event.message().getClass().getSimpleName(), event.message().id(), event.webhookEventId());
+            BusinessLog.write(log, Level.INFO, LogEvents.WEBHOOK_EVENT_SKIPPED, "Unsupported LINE message type",
+                    BusinessLog.fields("message_type", messageType, "message_id", event.message().id(),
+                            "outcome", "SKIPPED", "reason", "unsupported_message"));
             messages.replyText(event.replyToken(), "暂不支持");
             chat.recordOutbound(userId, "TEXT", mapper.createObjectNode().put("text", "暂不支持"));
         }

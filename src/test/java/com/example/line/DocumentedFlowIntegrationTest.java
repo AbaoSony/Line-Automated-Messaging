@@ -66,10 +66,16 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     @Test
     void documentedInboundAndOutboundDataMatchTheActualHttpFlow(CapturedOutput logs) throws Exception {
         byte[] text = Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-text.json"));
-        assertThat(send(text, false).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        var invalidResponse = send(text, false);
+        assertThat(invalidResponse.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(java.util.UUID.fromString(invalidResponse.getHeaders().getFirst("X-Trace-Id"))).isNotNull();
         assertThat(stub.replies).isEmpty();
 
-        assertThat(send(text, true).getStatusCode()).isEqualTo(HttpStatus.OK);
+        var textResponse = send(text, true);
+        assertThat(textResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String traceId = textResponse.getHeaders().getFirst("X-Trace-Id");
+        assertThat(java.util.UUID.fromString(traceId)).isNotNull();
+        assertThat(traceId).isNotEqualTo(invalidResponse.getHeaders().getFirst("X-Trace-Id"));
         ReplyCapture capture = stub.replies.poll(5, TimeUnit.SECONDS);
         assertThat(capture).isNotNull();
         assertThat(capture.method()).isEqualTo("POST");
@@ -155,7 +161,9 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(mapper.readTree(pushResponse.getBody()).path("alreadyAccepted").asBoolean()).isTrue();
         assertThat(logs).doesNotContain("documentation-test-secret", "documentation-test-token",
                 "documentation-internal-token", "Authorization: Bearer",
-                "00000000000000000000000000000001", "你好，我想查询订单");
+                "00000000000000000000000000000001");
+        assertThat(logs).contains("你好，我想查询订单", userId, traceId, "line.reply.sent", "user.message.received");
+        assertThat(logs).doesNotContain(textEvent.path("message").path("quoteToken").asText());
     }
 
     private ResponseEntity<String> send(byte[] body, boolean correctSignature) throws Exception {

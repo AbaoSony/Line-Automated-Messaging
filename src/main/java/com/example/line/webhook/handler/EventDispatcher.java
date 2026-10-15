@@ -1,5 +1,8 @@
 package com.example.line.webhook.handler;
 
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
+import org.slf4j.event.Level;
 import com.example.line.webhook.handler.EventHandler;
 import com.linecorp.bot.webhook.model.Event;
 import java.util.HashMap;
@@ -41,7 +44,9 @@ public class EventDispatcher {
     public void dispatch(Event event) throws Exception {
         var handler = handlers.get(event.getClass());
         if (handler == null) {
-            log.info("Unsupported LINE event type={}, eventId={}", event.getClass().getSimpleName(), event.webhookEventId());
+            BusinessLog.write(log, Level.INFO, LogEvents.WEBHOOK_EVENT_SKIPPED, "Unsupported LINE event type",
+                    BusinessLog.fields("message_type", event.getClass().getSimpleName(),
+                            "webhook_event_id", event.webhookEventId(), "outcome", "SKIPPED", "reason", "unsupported_event"));
             return;
         }
         invoke(handler, event);

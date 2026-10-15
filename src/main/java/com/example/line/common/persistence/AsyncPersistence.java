@@ -1,13 +1,14 @@
 package com.example.line.common.persistence;
 
 import com.example.line.common.logging.LogEvents;
+import com.example.line.common.logging.LogContext;
+import com.example.line.common.logging.BusinessLog;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
+import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -37,7 +38,7 @@ public class AsyncPersistence {
     public void submit(String operation, String userId, Runnable action) {
         try {
             executor.execute(() -> {
-                try {
+                try (var scope = LogContext.user(userId)) {
                     action.run();
                 } catch (RuntimeException failure) {
                     failed(operation, userId, failure);
@@ -45,17 +46,20 @@ public class AsyncPersistence {
             });
         } catch (RejectedExecutionException failure) {
             meters.counter("persistence.rejected").increment();
-            failed(operation, userId, failure);
+            try (var scope = LogContext.user(userId)) {
+                BusinessLog.failure(log, Level.WARN, LogEvents.EXECUTOR_REJECTED, "Persistence task rejected", failure,
+                        BusinessLog.fields("operation", operation, "outcome", "SKIPPED"));
+                failed(operation, userId, failure);
+            }
         }
     }
 
     private void failed(String operation, String userId, RuntimeException failure) {
         meters.counter("persist.failed", "operation", operation).increment();
-        String traceId = MDC.get("trace_id");
-        if (traceId == null) traceId = UUID.randomUUID().toString();
-        // JDBC 异常可能包含连接信息；只记录类型，禁止直接打印异常消息和绑定参数。
-        log.atError().addKeyValue("event", LogEvents.PERSIST_FAILED).addKeyValue("trace_id", traceId)
-                .addKeyValue("user_id", userId).addKeyValue("operation", operation)
-                .addKeyValue("error_type", failure.getClass().getSimpleName()).log("Database persistence failed");
+        // JDBC 异常可能包含连接信息；只记录类型与调用帧，禁止输出异常消息和绑定参数。
+        try (var scope = LogContext.user(userId)) {
+            BusinessLog.failure(log, Level.ERROR, LogEvents.PERSIST_FAILED, "Database persistence failed", failure,
+                    BusinessLog.fields("operation", operation, "outcome", "FAILED"));
+        }
     }
 }

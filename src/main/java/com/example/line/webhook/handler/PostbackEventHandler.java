@@ -1,8 +1,12 @@
 package com.example.line.webhook.handler;
 
 import com.linecorp.bot.webhook.model.PostbackEvent;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogData;
+import com.example.line.common.logging.LogEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,7 +23,7 @@ public class PostbackEventHandler implements EventHandler<PostbackEvent> {
      */
     public Class<PostbackEvent> eventType() { return PostbackEvent.class; }
     /**
-     * 接收 Postback 并记录 eventId，不把可能包含业务或用户信息的 data 写入日志。
+     * 接收 Postback 并完整记录业务 data，不记录事件凭证。
      *
      * @param event 非 null 的 Postback 事件；当前不要求 postback 内容参与业务校验
      * @throws NullPointerException event 为 null 时抛出；调用方应保证有效事件
@@ -27,6 +31,10 @@ public class PostbackEventHandler implements EventHandler<PostbackEvent> {
     public void handle(PostbackEvent event) {
         // Future business logic can read event.postback().data() here.
         // 这里保留业务扩展入口，当前日志不等于已经执行 data 中描述的动作。
-        log.info("LINE postback received eventId={}", event.webhookEventId());
+        BusinessLog.write(log, Level.INFO, LogEvents.USER_POSTBACK,
+                "LINE postback received eventId={}",
+                BusinessLog.fields("user_id", event.source() == null ? null : event.source().userId(),
+                        "webhook_event_id", event.webhookEventId(), "content", LogData.business(event.postback()),
+                        "outcome", "SUCCESS"), event.webhookEventId());
     }
 }

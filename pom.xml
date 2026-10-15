@@ -77,6 +77,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <!-- JSON 与易读文件固定 UTF-8，测试捕获输出也须使用相同字符集，避免 Windows 默认编码损坏中文断言。 -->
+                    <argLine>-Dfile.encoding=UTF-8</argLine>
                     <systemPropertyVariables>
                         <test.postgresql.image>${postgresql.image}</test.postgresql.image>
                     </systemPropertyVariables>

@@ -1,6 +1,8 @@
 package com.example.line.messaging;
 
 import com.example.line.messaging.LineSendProperties;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
 import com.linecorp.bot.client.base.exception.AbstractLineClientException;
 import java.io.IOException;
 import java.util.UUID;
@@ -8,6 +10,7 @@ import java.util.concurrent.*;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -67,6 +70,8 @@ public class LineApiCaller {
             } catch (InterruptedException e) {
                 if (future != null) future.cancel(true);
                 Thread.currentThread().interrupt();
+                BusinessLog.failure(log, Level.ERROR, pushRetryKey == null ? LogEvents.LINE_REPLY_FAILED : LogEvents.LINE_PUSH_FAILED,
+                        "LINE send interrupted", e, BusinessLog.fields("operation", operation, "outcome", "FAILED", "attempt", attempt));
                 throw new LineSendException(LineSendException.Reason.INTERRUPTED, null);
             } catch (Exception e) {
                 // 取消 Future 只减少本地等待，不证明 LINE 未执行；Push 后续仍须使用相同 Key。
@@ -87,14 +92,18 @@ public class LineApiCaller {
                         : LineSendException.Reason.UNEXPECTED_FAILURE;
                 boolean retry = transientError && attempt < attempts;
                 // 不输出原始异常消息或堆栈，SDK 错误可能包含请求正文或服务端回显内容。
-                log.warn("LINE send failed operation={}, status={}, attempt={}, retry={}",
-                        operation, status, attempt, retry);
+                BusinessLog.failure(log, retry ? Level.WARN : Level.ERROR,
+                        retry ? LogEvents.LINE_RETRY : pushRetryKey == null ? LogEvents.LINE_REPLY_FAILED : LogEvents.LINE_PUSH_FAILED,
+                        "LINE send failed", failure, BusinessLog.fields("operation", operation, "http_status", status,
+                                "attempt", attempt, "retry", retry, "outcome", "FAILED"));
                 if (!retry) throw new LineSendException(reason, status);
                 try {
                     // 默认首次失败等 200ms、再次失败等 400ms；二倍增长且次数有界，避免故障期紧密重试。
                     sleeper.sleep(properties.initialBackoff().toMillis() * (1L << (attempt - 1)));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
+                    BusinessLog.failure(log, Level.ERROR, LogEvents.LINE_PUSH_FAILED, "LINE retry interrupted", interrupted,
+                            BusinessLog.fields("operation", operation, "http_status", status, "attempt", attempt, "outcome", "FAILED"));
                     throw new LineSendException(LineSendException.Reason.INTERRUPTED, status);
                 }
             }

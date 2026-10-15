@@ -2,6 +2,12 @@ package com.example.line.messaging.internal;
 
 import com.example.line.messaging.internal.InternalPushProperties;
 import com.example.line.messaging.LineMessageService;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogContext;
+import com.example.line.common.logging.LogEvents;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController
 public class InternalPushController {
+    private static final Logger log = LoggerFactory.getLogger(InternalPushController.class);
     private final InternalPushProperties properties;
     private final LineMessageService messages;
     /**
@@ -53,7 +60,18 @@ public class InternalPushController {
         // 字节比较避免按匹配前缀逐字符提前返回；不得记录提供值或配置值来排查鉴权失败。
         if (token == null || !MessageDigest.isEqual(properties.getToken().getBytes(StandardCharsets.UTF_8),
                 token.getBytes(StandardCharsets.UTF_8))) return ResponseEntity.status(401).build();
-        var receipt = messages.pushText(request.userId(), request.text());
-        return ResponseEntity.ok(new PushResponse("ACCEPTED", receipt.retryKey().toString(), receipt.alreadyAccepted()));
+        try (var scope = LogContext.user(request.userId())) {
+            try {
+                var receipt = messages.pushText(request.userId(), request.text());
+                BusinessLog.write(log, Level.INFO, LogEvents.INTERNAL_PUSH_INVOKED, "Internal push invoked",
+                        BusinessLog.fields("outcome", "SUCCESS", "http_status", 200,
+                                "content", BusinessLog.fields("text", request.text())));
+                return ResponseEntity.ok(new PushResponse("ACCEPTED", receipt.retryKey().toString(), receipt.alreadyAccepted()));
+            } catch (RuntimeException failure) {
+                BusinessLog.failure(log, Level.ERROR, LogEvents.INTERNAL_PUSH_INVOKED, "Internal push failed", failure,
+                        BusinessLog.fields("outcome", "FAILED", "content", BusinessLog.fields("text", request.text())));
+                throw failure;
+            }
+        }
     }
 }

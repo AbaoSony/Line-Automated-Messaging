@@ -2,9 +2,10 @@ server:
   port: 8080
 
 logging:
+  config: classpath:logback-spring.xml
   structured:
     format:
-      console: logstash
+      console: com.example.line.common.logging.JsonLogFormatter
   level:
     com.linecorp.bot.client.wire: OFF
     com.zaxxer.hikari.HikariConfig: OFF
@@ -18,6 +19,12 @@ spring:
     locations: classpath:db/migration
 
 line:
+  logging:
+    service: ${APP_SERVICE:line-messaging-service}
+    env: ${APP_ENV:local}
+    version: ${APP_VERSION:0.0.1-SNAPSHOT}
+    instance: ${APP_INSTANCE:${HOSTNAME:${COMPUTERNAME:local}}}
+    readable-file: ${LOCAL_LOG_FILE:logs/application-readable.log}
   database:
     url: ${DATABASE_URL:}
     username: ${DATABASE_USERNAME:}

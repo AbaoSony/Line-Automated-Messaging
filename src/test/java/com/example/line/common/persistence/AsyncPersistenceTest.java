@@ -104,7 +104,8 @@ class AsyncPersistenceTest {
             });
             finish.countDown();
             assertThat(nextDone.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(nextTrace.get()).isNull();
+            assertThat(java.util.UUID.fromString(nextTrace.get())).isNotNull();
+            assertThat(nextTrace.get()).isNotEqualTo("fictional-trace");
         } finally {
             MDC.clear();
             finish.countDown();

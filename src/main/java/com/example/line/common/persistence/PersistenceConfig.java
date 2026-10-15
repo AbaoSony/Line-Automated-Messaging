@@ -1,7 +1,6 @@
 package com.example.line.common.persistence;
 
-import java.util.Map;
-import org.slf4j.MDC;
+import com.example.line.common.logging.MdcTaskDecorator;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,18 +19,7 @@ class PersistenceConfig {
         executor.setThreadNamePrefix("line-persist-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationMillis(properties.shutdownTimeout().toMillis());
-        executor.setTaskDecorator(task -> {
-            Map<String, String> caller = MDC.getCopyOfContextMap();
-            return () -> {
-                Map<String, String> previous = MDC.getCopyOfContextMap();
-                try {
-                    if (caller == null) MDC.clear(); else MDC.setContextMap(caller);
-                    task.run();
-                } finally {
-                    if (previous == null) MDC.clear(); else MDC.setContextMap(previous);
-                }
-            };
-        });
+        executor.setTaskDecorator(new MdcTaskDecorator());
         // 不使用 CallerRunsPolicy，数据库故障和积压不得拖慢即时回复。
         return executor;
     }

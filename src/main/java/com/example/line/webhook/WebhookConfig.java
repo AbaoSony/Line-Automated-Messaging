@@ -1,8 +1,12 @@
 package com.example.line.webhook;
 
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
+import com.example.line.common.logging.MdcTaskDecorator;
 import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,12 +34,16 @@ public class WebhookConfig {
         executor.setMaxPoolSize(properties.workers());
         executor.setQueueCapacity(properties.queueCapacity());
         executor.setThreadNamePrefix("line-webhook-");
+        executor.setTaskDecorator(new MdcTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         // 最多等待 30 秒是本项目的停机预算，并不承诺积压队列一定排空。
         executor.setAwaitTerminationSeconds(30);
         // 保持“快速返回 200”的现有策略；拒绝任务会丢失，不能将该日志视为可靠入队。
         executor.setRejectedExecutionHandler((task, pool) -> {
-            log.error("LINE webhook task rejected: active={}, queued={}, shutdown={}; request will be acknowledged but not processed",
+            BusinessLog.write(log, Level.ERROR, LogEvents.EXECUTOR_REJECTED,
+                    "LINE webhook task rejected: active={}, queued={}, shutdown={}; request will be acknowledged but not processed",
+                    BusinessLog.fields("active", pool.getActiveCount(), "queued", pool.getQueue().size(),
+                            "shutdown", pool.isShutdown(), "outcome", "SKIPPED"),
                     pool.getActiveCount(), pool.getQueue().size(), pool.isShutdown());
             throw new RejectedExecutionException("LINE webhook executor unavailable");
         });

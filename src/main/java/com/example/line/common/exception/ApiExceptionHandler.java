@@ -1,6 +1,11 @@
 package com.example.line.common.exception;
 
 import com.example.line.messaging.LineSendException;
+import com.example.line.common.logging.BusinessLog;
+import com.example.line.common.logging.LogEvents;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +18,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
     /**
      * 对外错误摘要，不携带 SDK 原始消息、请求正文或凭证。
      *
@@ -28,6 +34,8 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
     public ResponseEntity<ApiError> invalidRequest(Exception exception) {
+        BusinessLog.failure(log, Level.WARN, LogEvents.HTTP_REQUEST_FAILED, "Invalid HTTP request", exception,
+                BusinessLog.fields("http_status", 400, "outcome", "FAILED"));
         return ResponseEntity.badRequest().body(new ApiError("INVALID_REQUEST", null));
     }
     /**

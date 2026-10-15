@@ -37,15 +37,15 @@ class LifecycleEventHandlersTest {
         assertThat(output).contains("LINE unfollow userId=" + event.source().userId(), event.webhookEventId());
     }
 
-    // 场景：Postback 保留入口追踪，但不记录动作数据或 Reply Token。
+    // 场景：Postback 完整记录业务动作数据，凭证仍禁止进入日志。
     @Test
-    void postbackKeepsEntryPointAndDoesNotLogDataOrToken(CapturedOutput output) throws Exception {
+    void postbackKeepsFullBusinessDataAndDoesNotLogToken(CapturedOutput output) throws Exception {
         var event = (PostbackEvent) event("postback");
         var handler = new PostbackEventHandler();
         assertThat(handler.eventType()).isEqualTo(PostbackEvent.class);
         handler.handle(event);
-        assertThat(output).contains("LINE postback received eventId=" + event.webhookEventId())
-                .doesNotContain(event.postback().data(), event.replyToken());
+        assertThat(output).contains("LINE postback received eventId=" + event.webhookEventId(), event.postback().data())
+                .doesNotContain(event.replyToken());
     }
 
     private Event event(String sample) throws IOException {

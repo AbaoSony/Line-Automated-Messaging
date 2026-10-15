@@ -17,6 +17,10 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in environment or .env}
       CHAT_CLEANUP_ENABLED: ${CHAT_CLEANUP_ENABLED:-false}
       CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-90}
+      APP_SERVICE: ${APP_SERVICE:-line-messaging-service}
+      APP_ENV: ${APP_ENV:-local}
+      APP_VERSION: ${APP_VERSION:-0.0.1-SNAPSHOT}
+      APP_INSTANCE: ${APP_INSTANCE:-local}
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
