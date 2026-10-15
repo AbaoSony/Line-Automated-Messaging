@@ -184,6 +184,11 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(logs).doesNotContain(textEvent.path("message").path("quoteToken").asText());
         await().atMost(Duration.ofSeconds(5)).until(eventRecorder::isIdle);
         var storedEvent = jdbc.queryForMap("SELECT * FROM event_log WHERE trace_id = ? AND event = 'user.message.received'", traceId);
+        var generatedDetail=mapper.readTree(jdbc.queryForObject("SELECT detail::text FROM event_log WHERE trace_id=? AND event='ai.generate.success'",String.class,traceId));
+        assertThat(generatedDetail.path("content").has("incomplete_reason")).isTrue();
+        assertThat(generatedDetail.path("content").path("incomplete_reason").isNull()).isTrue();
+        assertThat(generatedDetail.path("content").has("reasoning_tokens")).isTrue();
+        assertThat(generatedDetail.path("content").path("reasoning_tokens").isNull()).isTrue();
         assertThat(storedEvent.get("user_id")).isEqualTo(userId);
         assertThat(storedEvent.get("webhook_event_id")).isEqualTo(textEvent.path("webhookEventId").asText());
         assertThat(mapper.readTree(storedEvent.get("detail").toString()).path("content").path("text").asText())

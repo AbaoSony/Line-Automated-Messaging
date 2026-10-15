@@ -62,7 +62,7 @@ public class AiChatService {
     /**
      * 接收当前私聊并立即返回业务完成阶段，等待任务不占 Webhook 工作线程。
      * @param input 不含凭证的私聊输入
-     * @param replyToken 仅当前 15 秒处理使用的短效凭证，不写入模型、数据库或缓存
+     * @param replyToken 仅当前配置截止预算内使用的短效凭证，不写入模型、数据库或缓存
      * @return 当前处理终态，已成功 Reply 后缓存失败仍正常完成
      */
     public CompletionStage<Void> submit(AiInput input,String replyToken) {
@@ -126,7 +126,8 @@ public class AiChatService {
                 String invalid=invalid(result);
                 var fields=BusinessLog.fields("correlation_id",input.correlationId(),"model",result.modelName(),
                         "input_tokens",result.inputTokens(),"output_tokens",result.outputTokens(),"duration_ms",result.latencyMs(),
-                        "content",BusinessLog.fields("text",result.text(),"status",result.status()),"outcome",invalid==null?"SUCCESS":"FAILED");
+                        "content",BusinessLog.fields("text",result.text(),"status",result.status(),
+                                "incomplete_reason",result.incompleteReason(),"reasoning_tokens",result.reasoningTokens()),"outcome",invalid==null?"SUCCESS":"FAILED");
                 if(result.inputTokens()!=null)meters.counter("ai.tokens","direction","input").increment(result.inputTokens());
                 if(result.outputTokens()!=null)meters.counter("ai.tokens","direction","output").increment(result.outputTokens());
                 if(invalid==null) {

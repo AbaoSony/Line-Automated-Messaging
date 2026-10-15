@@ -1,0 +1,22 @@
+{
+  "event": "ai.generate.failed",
+  "level": "WARN",
+  "trace_id": "44444444-4444-4444-8444-444444444444",
+  "webhook_event_id": "fictional-reasoning-limit",
+  "user_id": "Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "model": "gpt-6-astra",
+  "input_tokens": 100,
+  "output_tokens": 1024,
+  "duration_ms": 25,
+  "error_type": "incomplete",
+  "outcome": "FAILED",
+  "detail": {
+    "correlation_id": "fictional-reasoning-limit",
+    "content": {
+      "text": "",
+      "status": "INCOMPLETE",
+      "incomplete_reason": "max_output_tokens",
+      "reasoning_tokens": 1024
+    }
+  }
+}

@@ -136,15 +136,25 @@ class WebhookServiceTest {
     }
 
     @Test
-    // 场景：本次接收后的等待超过 15 秒时不发送 Reply。
-    void queuedReplyOlderThan15SecondsIsNotSent() throws Exception {
+    // 场景：本次接收后的等待超过放宽后的 45 秒时仍不能发送 Reply。
+    void queuedReplyOlderThan45SecondsIsNotSent() throws Exception {
         var messages = mock(LineMessageService.class);
         var service = new WebhookService(Runnable::run,
                 new EventDispatcher(List.of(new MessageEventHandler(messages, mock(com.example.line.chat.ChatMessageService.class), mock(com.example.line.ai.AiChatService.class), Runnable::run))), cache());
         service.process(payload("stale", false,
                 "\"type\":\"message\",\"replyToken\":\"reply\",\"message\":{\"type\":\"text\",\"id\":\"1\",\"text\":\"hello\"}"),
-                System.nanoTime() - TimeUnit.SECONDS.toNanos(16));
+                System.nanoTime() - TimeUnit.SECONDS.toNanos(46));
         verifyNoInteractions(messages);
+    }
+
+    @Test void messagePastOld15SecondLimitStillDispatchesWithinNewBudget() throws Exception {
+        var dispatcher=mock(EventDispatcher.class);
+        when(dispatcher.dispatchAsync(any())).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+        var service=new WebhookService(Runnable::run,dispatcher,cache());
+        service.process(payload("within-new-budget",false,
+                "\"type\":\"message\",\"replyToken\":\"reply\",\"message\":{\"type\":\"text\",\"id\":\"fictional-relaxed\",\"text\":\"hello\"}"),
+                System.nanoTime()-TimeUnit.SECONDS.toNanos(16));
+        verify(dispatcher).dispatchAsync(any());
     }
 
     @Test

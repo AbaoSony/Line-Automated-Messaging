@@ -35,7 +35,7 @@ spring:
 
 line:
   ai:
-    total-timeout: ${AI_TOTAL_TIMEOUT:15s}
+    total-timeout: ${AI_TOTAL_TIMEOUT:45s}
     send-reserve: ${AI_SEND_RESERVE:3s}
     queue-wait: ${AI_QUEUE_WAIT:3s}
     lock-wait: ${AI_LOCK_WAIT:500ms}
@@ -55,10 +55,10 @@ line:
       name: ${OPENAI_MODEL:gpt-6.1-sol}
       reasoning: ${OPENAI_REASONING:low}
       max-input-tokens: ${AI_MAX_INPUT_TOKENS:8192}
-      max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:1024}
-      total-timeout: ${AI_MODEL_TOTAL_TIMEOUT:8s}
-      attempt-timeout: ${AI_MODEL_ATTEMPT_TIMEOUT:4s}
-      connect-timeout: ${AI_MODEL_CONNECT_TIMEOUT:1s}
+      max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:4096}
+      total-timeout: ${AI_MODEL_TOTAL_TIMEOUT:40s}
+      attempt-timeout: ${AI_MODEL_ATTEMPT_TIMEOUT:40s}
+      connect-timeout: ${AI_MODEL_CONNECT_TIMEOUT:3s}
       retry-backoff: ${AI_MODEL_RETRY_BACKOFF:100ms}
     memory:
       namespace: ${AI_NAMESPACE:}
@@ -74,7 +74,7 @@ line:
       password: ${REDIS_PASSWORD:}
       ssl: ${REDIS_SSL:false}
   user-deletion:
-    timeout: ${USER_DELETION_TIMEOUT:20s}
+    timeout: ${USER_DELETION_TIMEOUT:60s}
   event-recorder:
     queue-capacity: ${LOG_QUEUE_CAPACITY:4096}
     batch-size: ${LOG_BATCH_SIZE:100}

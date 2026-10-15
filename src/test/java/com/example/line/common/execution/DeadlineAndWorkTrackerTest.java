@@ -9,6 +9,20 @@ import static org.assertj.core.api.Assertions.*;
 
 /** 用可控单调时钟验证阶段不重置预算，以及删除屏障、等待失败和旧请求墓碑。 */
 class DeadlineAndWorkTrackerTest {
+    @Test void deletionTombstoneCoversTheEntireRelaxedRequestLifetime() {
+        var clock=new AtomicLong(Duration.ofSeconds(100).toNanos());
+        var tracker=new UserWorkTracker(clock::get);
+        long receipt=clock.get();
+        clock.addAndGet(Duration.ofSeconds(1).toNanos());
+        try(var barrier=tracker.block("Ufictional-relaxed")){barrier.await(Duration.ofMillis(1));barrier.committed();}
+        MDC.put("received_nanos",Long.toString(receipt));
+        try {
+            clock.addAndGet(Duration.ofSeconds(50).toNanos());
+            assertThat(tracker.register("Ufictional-relaxed")).isNull();
+            clock.addAndGet(Duration.ofSeconds(26).toNanos());
+            try(var released=tracker.register("Ufictional-relaxed")){assertThat(released).isNotNull();}
+        }finally{MDC.clear();}
+    }
     @Test void stagesShareEntryDeadlineInsteadOfResettingIt(){
         var tick=new AtomicLong(100);var deadline=Deadline.from(100,Duration.ofSeconds(15),tick::get);
         tick.addAndGet(Duration.ofSeconds(10).toNanos());assertThat(deadline.remaining()).isEqualTo(Duration.ofSeconds(5));

@@ -10,8 +10,15 @@ import org.springframework.stereotype.Component;
 @Component
 public class UserWorkTracker {
     private static final int MAX_TRACKED_USERS = 4096;
-    private static final Duration TOMBSTONE_TTL = Duration.ofSeconds(30);
+    // 墓碑覆盖最长 50 秒入口预算及清理余量，避免放宽模型等待后旧请求重新进入。
+    private static final Duration TOMBSTONE_TTL = Duration.ofSeconds(75);
     private final Map<String, Slot> slots = new HashMap<>();
+    private final java.util.function.LongSupplier clock;
+
+    /** 使用单调时钟跟踪在途工作和删除后的旧请求保护。 */
+    public UserWorkTracker() { this(System::nanoTime); }
+
+    UserWorkTracker(java.util.function.LongSupplier clock) { this.clock=clock; }
 
     /**
      * 登记当前短时工作；删除中的用户或旧请求不能产生新的写入。
@@ -28,7 +35,7 @@ public class UserWorkTracker {
             slots.put(userId, slot);
         }
         String received = MDC.get("received_nanos");
-        long receipt = received == null ? System.nanoTime() : Long.parseLong(received);
+        long receipt = received == null ? clock.getAsLong() : Long.parseLong(received);
         if (slot.blocked || slot.deleted && receipt < slot.deletedAt) return null;
         slot.pending++;
         return new Lease(userId, slot);
@@ -57,7 +64,7 @@ public class UserWorkTracker {
     public synchronized boolean blocked(String userId) { return slots.containsKey(userId) && slots.get(userId).blocked; }
 
     private void prune() {
-        long cutoff = System.nanoTime() - TOMBSTONE_TTL.toNanos();
+        long cutoff = clock.getAsLong() - TOMBSTONE_TTL.toNanos();
         slots.entrySet().removeIf(entry -> entry.getValue().pending == 0 && !entry.getValue().blocked
                 && (!entry.getValue().deleted || entry.getValue().deletedAt < cutoff));
     }
@@ -93,10 +100,10 @@ public class UserWorkTracker {
          * @throws IllegalStateException 超时或被中断时抛出，不假报删除成功
          */
         public void await(Duration timeout) {
-            long end = System.nanoTime() + timeout.toNanos();
+            long end = clock.getAsLong() + timeout.toNanos();
             synchronized (UserWorkTracker.this) {
                 while (slot.pending > 0) {
-                    long left = end - System.nanoTime();
+                    long left = end - clock.getAsLong();
                     if (left <= 0) throw new IllegalStateException("User deletion wait timed out");
                     try { java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(UserWorkTracker.this, left); }
                     catch (InterruptedException failure) {
@@ -107,7 +114,7 @@ public class UserWorkTracker {
             }
         }
         /** 标记删除提交，旧请求在其入口截止时间内也不能重新创建历史。 */
-        public void committed() { synchronized (UserWorkTracker.this) { slot.deletedAt = System.nanoTime(); slot.deleted=true; } }
+        public void committed() { synchronized (UserWorkTracker.this) { slot.deletedAt = clock.getAsLong(); slot.deleted=true; } }
         /** 解除屏障；删除失败时保留原有数据与工作结果，允许重试。 */
         @Override public void close() { synchronized (UserWorkTracker.this) { slot.blocked = false; prune(); } }
     }

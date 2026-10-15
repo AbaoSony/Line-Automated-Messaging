@@ -11,10 +11,10 @@ public record ModelProperties(@DefaultValue("gpt-6.1-sol") String name,
                               @DefaultValue("low") String reasoning,
                               Double temperature,
                               @DefaultValue("8192") int maxInputTokens,
-                              @DefaultValue("1024") int maxOutputTokens,
-                              @DefaultValue("8s") Duration totalTimeout,
-                              @DefaultValue("4s") Duration attemptTimeout,
-                              @DefaultValue("1s") Duration connectTimeout,
+                              @DefaultValue("4096") int maxOutputTokens,
+                              @DefaultValue("40s") Duration totalTimeout,
+                              @DefaultValue("40s") Duration attemptTimeout,
+                              @DefaultValue("3s") Duration connectTimeout,
                               @DefaultValue("100ms") Duration retryBackoff) {
     /**
      * 校验负责人选择的两种模型及官方支持参数，未知能力须明确接入后才开放。

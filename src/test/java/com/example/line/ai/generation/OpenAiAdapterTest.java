@@ -27,6 +27,7 @@ class OpenAiAdapterTest {
     private HttpServer server;
     private final BlockingQueue<Integer> statuses=new LinkedBlockingQueue<>();
     private final BlockingQueue<JsonNode> requests=new LinkedBlockingQueue<>();
+    private final BlockingQueue<String> responseBodies=new LinkedBlockingQueue<>();
     private final AtomicInteger calls=new AtomicInteger();
     private final ObjectMapper mapper=new ObjectMapper();
     private final CountDownLatch release=new CountDownLatch(1);
@@ -39,7 +40,7 @@ class OpenAiAdapterTest {
         server.createContext("/v1/responses",exchange -> {
             calls.incrementAndGet();
             requests.add(mapper.readTree(exchange.getRequestBody().readAllBytes()));
-            if(block)try{release.await(3,TimeUnit.SECONDS);}catch(InterruptedException failure){Thread.currentThread().interrupt();}
+            if(block)try{release.await(8,TimeUnit.SECONDS);}catch(InterruptedException failure){Thread.currentThread().interrupt();}
             Integer status=statuses.poll();if(status==null)status=200;
             String body=status==200?"""
                     {"id":"resp_fictional","object":"response","created_at":1,"status":"completed","model":"gpt-6.1-sol",
@@ -48,6 +49,7 @@ class OpenAiAdapterTest {
                      "usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30,
                        "input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":5}}}
                     """:"{\"error\":{\"message\":\"fake-private-upstream-api-key\",\"type\":\"fictional_error\",\"code\":\"fake\"}}";
+            String plannedBody=responseBodies.poll();if(status==200 && plannedBody!=null)body=plannedBody;
             byte[] response=body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type","application/json");
             try {exchange.sendResponseHeaders(status,response.length);exchange.getResponseBody().write(response);}
@@ -62,6 +64,59 @@ class OpenAiAdapterTest {
     private ChatRequest request(Duration budget){return new ChatRequest("虛構 system",List.of(new ChatRequest.HistoryMessage("user","原始歷史"),
             new ChatRequest.HistoryMessage("assistant","原始回覆")),"當前輸入","fictional-id","fictional-correlation",Instant.EPOCH,Deadline.current(budget));}
     private OpenAiChatModelClient adapter(ModelProperties settings){return new OpenAiChatModelClient(client,settings,new SimpleMeterRegistry());}
+    @ParameterizedTest @ValueSource(strings={"max_output_tokens","content_filter"})
+    void incompleteResponseRetainsReasonAndReasoningUsageWithoutRetrying(String reason) {
+        responseBodies.add("""
+                {"id":"resp_fictional_incomplete","object":"response","created_at":1,"status":"incomplete","model":"gpt-6-astra",
+                 "incomplete_details":{"reason":"%s"},"output":[],
+                 "usage":{"input_tokens":100,"output_tokens":1024,"total_tokens":1124,
+                  "input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":1024}}}
+                """.formatted(reason));
+        var result=adapter(GenerationPolicyTest.settings(8192)).generate(request(Duration.ofSeconds(3)));
+        assertThat(result.status()).isEqualTo("INCOMPLETE");assertThat(result.text()).isEmpty();
+        assertThat(result.incompleteReason()).isEqualTo(reason);
+        assertThat(result.reasoningTokens()).isEqualTo(1024);assertThat(result.outputTokens()).isEqualTo(1024);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
+    @Test void defaultModelRequestLeavesMoreRoomForReasoningWithoutForcingLongText() throws Exception {
+        var settings=org.springframework.boot.context.properties.bind.Binder.get(new org.springframework.mock.env.MockEnvironment())
+                .bindOrCreate("line.ai.model",ModelProperties.class);
+        var result=adapter(settings).generate(request(Duration.ofSeconds(3)));
+        var sent=requests.poll(1,TimeUnit.SECONDS);
+        assertThat(sent.path("max_output_tokens").asInt()).isEqualTo(4096);
+        assertThat(result.outputTokens()).isEqualTo(20);assertThat(result.reasoningTokens()).isEqualTo(5);
+        assertThat(result.incompleteReason()).isNull();
+    }
+    @Test void missingUsageAndUnknownIncompleteReasonDoNotInventCountersOrExposeUpstreamText() {
+        responseBodies.add("""
+                {"id":"resp_fictional_unknown","object":"response","created_at":1,"status":"incomplete",
+                 "model":"gpt-6-astra","incomplete_details":{"reason":"fake-private-upstream-value"},"output":[]}
+                """);
+        var result=adapter(GenerationPolicyTest.settings(8192)).generate(request(Duration.ofSeconds(3)));
+        assertThat(result.incompleteReason()).isEqualTo("unknown");
+        assertThat(result.reasoningTokens()).isNull();assertThat(result.inputTokens()).isNull();assertThat(result.outputTokens()).isNull();
+    }
+    @Test void astraMaxCanFinishBeyondOldFourSecondAttemptWithoutRestartingGeneration() throws Exception {
+        var environment=new org.springframework.mock.env.MockEnvironment()
+                .withProperty("line.ai.model.name","gpt-6-astra").withProperty("line.ai.model.reasoning","max");
+        var settings=org.springframework.boot.context.properties.bind.Binder.get(environment).bindOrCreate("line.ai.model",ModelProperties.class);
+        // SDK 预热与慢响应分离，保证检查的是模型等待而非首次客户端装配时间。
+        adapter(settings).generate(request(Duration.ofSeconds(45)));
+        calls.set(0);requests.clear();block=true;
+        var worker=Executors.newSingleThreadExecutor();
+        try {
+            var result=worker.submit(() -> adapter(settings).generate(request(Duration.ofSeconds(45))));
+            var sent=requests.poll(2,TimeUnit.SECONDS);assertThat(sent).isNotNull();
+            assertThat(sent.path("model").asText()).isEqualTo("gpt-6-astra");
+            assertThat(sent.path("reasoning").path("effort").asText()).isEqualTo("max");
+            assertThatThrownBy(() -> result.get(4100,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            assertThat(calls.get()).isEqualTo(1);
+            release.countDown();
+            assertThat(result.get(2,TimeUnit.SECONDS).status()).isEqualTo("COMPLETED");
+            assertThat(calls.get()).isEqualTo(1);
+        }finally{release.countDown();worker.shutdownNow();}
+    }
     @Test void realSdkRequestPreservesRolesOmitsUnsupportedParametersAndReturnsUsage(CapturedOutput logs) throws Exception {
         ChatResult result=adapter(GenerationPolicyTest.settings(8192)).generate(request(Duration.ofSeconds(3)));
         assertThat(result.text()).isEqualTo("虛構模型回覆");assertThat(result.inputTokens()).isEqualTo(10);assertThat(result.outputTokens()).isEqualTo(20);

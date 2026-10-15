@@ -63,7 +63,7 @@ public class WebhookService {
      */
     public WebhookService(Executor executor,EventDispatcher dispatcher,EventDeduplicator deduplicator){
         this.executor=executor;this.dispatcher=dispatcher;this.deduplicator=deduplicator;
-        this.tracker=new com.example.line.common.execution.UserWorkTracker();this.totalTimeout=java.time.Duration.ofSeconds(15);
+        this.tracker=new com.example.line.common.execution.UserWorkTracker();this.totalTimeout=java.time.Duration.ofSeconds(45);
     }
 
     /**
@@ -124,7 +124,7 @@ public class WebhookService {
         String id = event.webhookEventId();
         // Do not retain a short-lived replyToken behind slow/busy workers.
         // Measure from this HTTP delivery, not LINE timestamp (redeliveries retain it).
-        // 15 秒是本项目保守的排队预算，不是 LINE 的官方有效期承诺；同批前置业务耗时也计入。
+        // 与 AI 使用同一可配置入口预算，不把默认 45 秒当作 LINE 有效期承诺；同批耗时也计入。
         if (event instanceof MessageEvent && System.nanoTime() - receivedNanos > totalTimeout.toNanos()) {
             BusinessLog.write(log, Level.WARN, LogEvents.WEBHOOK_EVENT_SKIPPED,
                     "Skipping stale queued reply; receipt age exceeds configured budget",

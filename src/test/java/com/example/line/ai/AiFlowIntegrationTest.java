@@ -58,6 +58,28 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     private String user(){return "U"+UUID.randomUUID().toString().replace("-","");}
     private String key(String user,String suffix){return memoryProperties.namespace()+":{"+user+"}:"+suffix;}
     private ChatResult result(String text){return new ChatResult(text,"gpt-6.1-sol",123,45,7,"COMPLETED");}
+    @Test void reasoningExhaustionIsLoggedWithActualUsageButNeverAddedAsSuccessfulAiHistory(CapturedOutput logs) throws Exception {
+        String user=user();
+        doReturn(new ChatResult("","gpt-6-astra",100,1024,25,"INCOMPLETE","max_output_tokens",1024))
+                .when(testModel).generate(any());
+        var response=send(user,"fictional-reasoning-limit","虛構測試問題","user","active");drain();
+        var failed=jdbc.queryForMap("SELECT event,model,input_tokens,output_tokens,duration_ms,error_type,outcome,detail::text FROM event_log WHERE trace_id=? AND event='ai.generate.failed'",
+                response.getHeaders().getFirst("X-Trace-Id"));
+        assertThat(failed.get("output_tokens")).isEqualTo(1024L);
+        var content=mapper.readTree(failed.get("detail").toString()).path("content");
+        var example=mapper.readTree(java.nio.file.Files.readAllBytes(java.nio.file.Path.of("docs/examples/webhook/ai-generation-incomplete.json")));
+        for(String field:java.util.List.of("event","model","error_type","outcome"))
+            assertThat(failed.get(field)).isEqualTo(example.path(field).asText());
+        for(String field:java.util.List.of("input_tokens","output_tokens","duration_ms"))
+            assertThat(((Number)failed.get(field)).longValue()).isEqualTo(example.path(field).asLong());
+        assertThat(content).isEqualTo(example.path("detail").path("content"));
+        assertThat(content.path("incomplete_reason").asText()).isEqualTo("max_output_tokens");
+        assertThat(content.path("reasoning_tokens").asInt()).isEqualTo(1024);
+        assertThat(jdbc.queryForObject("SELECT reply_kind FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",String.class,user)).isEqualTo("FALLBACK");
+        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain("虛構測試問題");
+        assertThat(logs).contains("max_output_tokens","reasoning_tokens").doesNotContain("fake-openai-api-key","fake-ai-reply-token","fake-ai-quote-token");
+        verify(line).replyMessage(any());verify(testModel).generate(any());
+    }
     @Test void normalAiPersistsRealUsagePairsHistoryAndLogsCompleteBusinessDataWithoutCredentials(CapturedOutput logs) throws Exception {
         String user=user();var captured=new CopyOnWriteArrayList<ChatRequest>();
         doAnswer(call -> {var request=call.getArgument(0,ChatRequest.class);captured.add(request);return result("虛構回覆:"+request.userMessage());}).when(testModel).generate(any());

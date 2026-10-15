@@ -160,6 +160,6 @@ ai/          私聊 AI 编排，generation/、memory/、coordination/ 分别隔�
 
 1. 已批准依赖 openai-java 4.81.0 与 Spring Data Redis；只对 active 一对一 USER 文本调用 AI，模型默认 gpt-6.1-sol、reasoning=low。厂商类型只留在 generation 适配内部。
 2. 当前仅支持同一 Channel 一份活动进程，升级时先停旧进程，禁止滚动副本重叠；Redis 锁不代表已实现共享去重、跨实例排序或删除屏障。
-3. HTTP 接收起统一截止预算默认 15 秒，预留发送 3 秒；短效 Reply Token 只保留在当前有界内存任务中，不写入数据库、Redis、日志或恢复任务。Reply 结果未知时不得补发兜底或改 Push。
+3. HTTP 接收起统一截止预算默认 45 秒、配置上限 50 秒，预留发送 3 秒；短效 Reply Token 只保留在当前有界内存任务中，不写入数据库、Redis、日志或恢复任务。Reply 结果未知时不得补发兜底或改 Push。
 4. 上下文只纳入明确关联、已获 LINE 接受的正常 AI 私聊完整轮次；来源未知旧数据完整保留但不进入模型。提示和生成失败不得污染上下文。
 5. PostgreSQL/Redis 测试使用 Testcontainers 临时容器；OpenAI 用 mock 或本地 HTTP Stub，禁止真实模型调用。完整允许业务上下文和输出按日志规范记录，凭证禁记。

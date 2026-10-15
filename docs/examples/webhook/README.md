@@ -72,3 +72,17 @@ FROM chat_message WHERE user_id = 'Uaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ORDER BY i
 ```
 
 所有 SQL 标识仍为虚构占位值。部署方须人工验证真实模型权限、预算内响应率和费用；本地测试不产生真实模型调用或消息发送费用。Redis/数据库删除与模型迟到不会补发原消息，数据保留与清理仍沿用默认关闭策略。
+
+### 放宽模型等待的验证（已实现）
+
+默认入口总预算 45s、模型阶段与单次均为 40s、连接 3s；删除等待 60s，旧请求墓碑 75s。现有虚构 JSON 字段与固定模型结果不变，DocumentedFlowIntegrationTest 继续逐字段验证。AiBudgetPropertiesTest 验证新默认值和 50s 上限；WebhookServiceTest 验证 16s 入口仍可分发、46s 入口被跳过；DeadlineAndWorkTrackerTest 用可控时钟验证超过旧墓碑时长的旧请求仍被拒绝；OpenAiAdapterTest 用真实官方 SDK 和本地 HTTP 服务验证 Astra/max 超过旧 4 秒仍可在首次调用完成。
+
+IDEA/Maven 如果配置过旧 AI_* 环境变量，按接口文档 2.5 更新并重启；`.env` 只由 Compose 注入。手工联调只发送新的测试私聊，不重放旧凭证；按新请求 trace_id 查看模型是否在放宽后完成，以及 LINE 是否接受。超时仍可能发生，若 error_type=incomplete，输出 token 预算需独立评估。
+
+### 推理耗尽输出预算的验证（已实现）
+
+[ai-generation-incomplete.json](ai-generation-incomplete.json) 是完整虚构的生成事件业务字段，不是 Webhook 请求。该样例特意复现旧 1024 输出额度场景，当前默认已为 4096；空正文、INCOMPLETE、incomplete_reason=max_output_tokens、reasoning_tokens=1024 表示虚构响应把旧输出预算用于推理；content_filter 等其他原因独立保留，不猜测所有未完成都是超时。
+
+AiFlowIntegrationTest 比较该 JSON 的固定业务字段，验证用量留在失败事件、FALLBACK 出站不伪造模型用量，空白结果不进入上下文，凭证仍禁记。OpenAiAdapterTest 使用本地 HTTP Stub 验证官方 SDK 的未完成原因/推理用量映射、未知明细为空，以及默认 max_output_tokens=4096 不要求实际生成满额。
+
+IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成 4096；模型单次/阶段环境变量同步设 40s，然后重启。在测试 Channel 中先等上一条回复再发送下一条，可以分别验证模型完成情况和同用户排队；连续发送超过 3s 等待仍返回 BUSY，规则未修改。提高额度可能增加实际输出费用，max 推理仍可能超过当前总时限，不能以本地模拟测试代替真实模型验收。

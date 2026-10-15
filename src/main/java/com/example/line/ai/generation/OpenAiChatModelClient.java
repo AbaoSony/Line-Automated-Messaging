@@ -74,9 +74,15 @@ public final class OpenAiChatModelClient implements ChatModelClient {
                 }
                 var usage = response.usage();
                 String model = response.model().string().orElse(properties.name());
+                String incompleteReason=response.incompleteDetails().flatMap(Response.IncompleteDetails::reason)
+                        .map(reason -> java.util.Set.of("max_output_tokens","max_messages","content_filter","steered").contains(reason.asString())
+                                ? reason.asString():"unknown").orElse(null);
+                Integer reasoningTokens=usage.flatMap(value -> value._outputTokensDetails().asKnown())
+                        .flatMap(value -> value._reasoningTokens().asKnown()).map(Math::toIntExact).orElse(null);
                 return new ChatResult(text.toString(), model, usage.map(value -> Math.toIntExact(value.inputTokens())).orElse(null),
                         usage.map(value -> Math.toIntExact(value.outputTokens())).orElse(null),
-                        Duration.ofNanos(request.deadline().clock().getAsLong()-begin).toMillis(), completed ? "COMPLETED" : "INCOMPLETE");
+                        Duration.ofNanos(request.deadline().clock().getAsLong()-begin).toMillis(), completed ? "COMPLETED" : "INCOMPLETE",
+                        incompleteReason,reasoningTokens);
             } catch (InterruptedException failure) {
                 if (pending != null) pending.cancel(true);
                 Thread.currentThread().interrupt();
