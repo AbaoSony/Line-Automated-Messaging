@@ -11,7 +11,7 @@ public final class RecordData {
             "user_id", "outcome", "duration_ms", "http_status", "error_type", "message_type", "model",
             "input_tokens", "output_tokens", "service", "env", "version", "instance", "operator", "source_ip", "target_user_id");
     private static final Set<String> DETAIL = Set.of("operation", "attempt", "retry", "active", "queued", "shutdown",
-            "message_id", "text_length", "content", "messages", "is_redelivery", "reason", "correlation_id", "reply_kind", "stage", "turn_id", "member_count", "input_version", "generation_version");
+            "message_id", "text_length", "content", "messages", "is_redelivery", "reason", "correlation_id", "reply_kind", "stage", "turn_id", "member_count", "input_version", "generation_version", "delivery_outcome");
 
     private RecordData() {}
 

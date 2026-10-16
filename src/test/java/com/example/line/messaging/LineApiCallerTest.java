@@ -8,19 +8,55 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /** 验证 SDK 错误分类、有限指数退避、超时取消与线程中断处理。 */
 class LineApiCallerTest {
+    @Test void alreadyInterruptedReplyNeverStartsSdkRequest() {
+        var calls=new AtomicInteger();
+        try {
+            Thread.currentThread().interrupt();
+            assertThatThrownBy(() -> caller(new ArrayList<>()).execute("reply",null,() -> {
+                calls.incrementAndGet();return CompletableFuture.completedFuture(null);
+            })).isInstanceOfSatisfying(LineSendException.class,
+                    failure -> {
+                        assertThat(failure.getReason()).isEqualTo(LineSendException.Reason.INTERRUPTED);
+                        assertThat(failure.getDeliveryOutcome()).isEqualTo(LineSendException.DeliveryOutcome.NOT_SENT);
+                    });
+            assertThat(calls.get()).isZero();assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {Thread.interrupted();}
+    }
+    @Test void expiredDeadlineBeforeSupplierIsKnownNotSent() {
+        var calls=new AtomicInteger();
+        var deadline=com.example.line.common.execution.Deadline.from(0,Duration.ofMillis(1),() -> Duration.ofMillis(2).toNanos());
+        assertThatThrownBy(() -> caller(new ArrayList<>()).execute("reply",null,() -> {
+            calls.incrementAndGet();return CompletableFuture.completedFuture(null);
+        },deadline)).isInstanceOfSatisfying(LineSendException.class,
+                failure -> assertThat(failure.getDeliveryOutcome()).isEqualTo(LineSendException.DeliveryOutcome.NOT_SENT));
+        assertThat(calls.get()).isZero();
+    }
+    @ParameterizedTest @CsvSource({"400,REJECTED","408,REJECTED","409,REJECTED","429,REJECTED","500,UNKNOWN","503,UNKNOWN"})
+    void replyFailurePreservesDeliveryFactAndNeverRetries(int status,LineSendException.DeliveryOutcome expected) {
+        var calls=new AtomicInteger();
+        assertThatThrownBy(() -> caller(new ArrayList<>()).execute("reply",null,() -> {
+            calls.incrementAndGet();return CompletableFuture.failedFuture(httpFailure(status,"fictional-accepted-header"));
+        })).isInstanceOfSatisfying(LineSendException.class,failure -> {
+            assertThat(failure.getUpstreamStatus()).isEqualTo(status);assertThat(failure.getDeliveryOutcome()).isEqualTo(expected);
+        });
+        assertThat(calls.get()).isEqualTo(1);
+    }
     @Test void sharedDeadlineIsRecheckedAfterStartingSdkRequest() {
         var clock=new java.util.concurrent.atomic.AtomicLong(0);
         var deadline=com.example.line.common.execution.Deadline.from(0,Duration.ofMillis(5),clock::get);
         var pending=new CompletableFuture<>();
         assertThatThrownBy(() -> caller(new ArrayList<>()).execute("reply",null,() -> {
             clock.set(Duration.ofMillis(6).toNanos());return pending;
-        },deadline)).isInstanceOf(LineSendException.class);
+        },deadline)).isInstanceOfSatisfying(LineSendException.class,
+                failure -> assertThat(failure.getDeliveryOutcome()).isEqualTo(LineSendException.DeliveryOutcome.UNKNOWN));
         assertThat(pending.isCancelled()).isTrue();
     }
     private AbstractLineClientException httpFailure(int code, String acceptedId) {

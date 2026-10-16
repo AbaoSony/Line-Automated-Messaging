@@ -104,3 +104,12 @@ IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成
 4. 普通运行的连发会受实际时机、固定截止、容量和一次撤销额度影响，可能形成待处理轮次；不能把这个可控轨迹当作所有连发都只调用一次模型的保证。
 
 多成员过渡出站 content.ai_turn 保存完整成员，in_reply_to_message_id=null；第五阶段关联表完成前，该轮不进入后续上下文。单成员原有示例与断言继续有效。MODEL 时机判断尚未实现，当前用 AI_DECISION_MODE=RULE；技术兜底仍默认静默。
+
+
+## P2 第四阶段未知发送示例（全部虚构，已实现）
+
+`webhook-aggregate-unknown.json` 为两条同轮入站，`../reply/reply-aggregate-unknown-request.json` 是唯一实际出站尝试，`../reply/reply-unknown-event.json` 是安全失败事件。所有标识与凭证均为虚构占位符，不能使用文件凭证请求真实 LINE。
+
+ReplyOutcomeIntegrationTest 对原始字节签名并提交本地服务，屏障保证两条在首次正文前准入；生产传输/官方 SDK 指向回环 HTTP Stub。Stub 返回 503 和 Retry-After:0，断言只有一次实际 POST，失败事件 delivery_outcome=UNKNOWN、顶层 outcome=FAILED；完整入站保留，无正常成功出站。将相同事件 deliveryContext.isRedelivery 改为 true 后再提交，断言不再生成或 Reply，不改用 Push。
+
+同测试另外注入明确 4xx、307、断连、超时后迟到 200 和非法 2xx 正文，并验证发送中新增成员及删除竞态。已发起请求的本地取消不表示远端撤回；只有 SDK 前终止才记 NOT_SENT。原 DocumentedFlowIntegrationTest 正常 Reply/Push 示例继续有效，并使用同一受控消息传输策略。

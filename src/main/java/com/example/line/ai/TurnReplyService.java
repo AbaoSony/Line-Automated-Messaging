@@ -31,6 +31,7 @@ public class TurnReplyService implements UserDataPurger {
     private final ObjectMapper mapper;
     private final MeterRegistry meters;
     private final LinkedHashMap<String, Long> hints = new LinkedHashMap<>(16, .75f, true);
+    private Long hintsSuppressedAt;
 
     /**
      * 注入发送、记录及删除能力；冷却只保存有限用户标识和单调时间，不保存凭证。
@@ -77,8 +78,10 @@ public class TurnReplyService implements UserDataPurger {
             // claim 与发送异常处理之间不能进入生成兜底，否则未知结果可能再次消费凭证。
             try { messages.replyText(permit.token(),text,permit.deadline()); }
             catch (LineSendException failure) {
-                boolean known=failure.getReason()==LineSendException.Reason.CLIENT_ERROR;
+                boolean known=failure.getDeliveryOutcome()!=LineSendException.DeliveryOutcome.UNKNOWN;
                 turns.finishSending(ticket,known?TurnState.FAILED:TurnState.UNKNOWN); return;
+            } catch (IllegalArgumentException failure) {
+                turns.finishSending(ticket,TurnState.FAILED); dependencyFailure("send_validation",failure); return;
             } catch (RuntimeException failure) {
                 turns.finishSending(ticket,TurnState.UNKNOWN); dependencyFailure("send_unknown",failure); return;
             }
@@ -129,17 +132,28 @@ public class TurnReplyService implements UserDataPurger {
     private boolean technicalAllowed(String user,String kind) {
         if (!ai.technicalRepliesEnabled()) { skipped("technical_replies_disabled",kind); return false; }
         synchronized (hints) {
-            long now=System.nanoTime(); Long previous=hints.get(user);
+            long now=System.nanoTime();pruneHints(now);Long previous=hints.get(user);
             if (previous!=null && now-previous<decision.technicalReplyCooldown().toNanos()) {
                 skipped("technical_reply_cooldown",kind); return false;
+            }
+            if(hintsSuppressedAt!=null && now-hintsSuppressedAt<decision.technicalReplyCooldown().toNanos() || hints.size()>=ai.maxUsers()) {
+                skipped("technical_reply_capacity",kind);return false;
             }
             remember(user,now); return true;
         }
     }
     private void noteSend(String user) { synchronized(hints) { remember(user,System.nanoTime()); } }
     private void remember(String user,long now) {
+        pruneHints(now);
+        if(hints.containsKey(user))return;
+        // 饱和时不能驱逐刚尝试/未知的记录；未能记住的正常发送也保守抑制提示，避免立刻追加话术。
+        if(hints.size()>=ai.maxUsers()) {
+            hintsSuppressedAt=now;return;
+        }
+        hints.put(user,now);
+    }
+    private void pruneHints(long now) {
         hints.entrySet().removeIf(entry -> now-entry.getValue()>=decision.technicalReplyCooldown().toNanos());
-        hints.put(user,now); while(hints.size()>ai.maxUsers()) hints.remove(hints.keySet().iterator().next());
     }
     private ChatMetadata metadata(InboundMember first,String kind,ChatResult result) {
         return metadata(first,kind,result,true);

@@ -20,7 +20,7 @@ final class LogFields {
             "http_status", "error_type", "message_type", "model", "input_tokens", "output_tokens", "operation",
             "attempt", "retry", "active", "queued", "shutdown", "message_id", "text_length", "content",
             "messages", "is_redelivery", "reason", "stack_trace", "operator", "source_ip", "target_user_id",
-            "correlation_id", "reply_kind", "stage", "turn_id", "member_count", "input_version", "generation_version");
+            "correlation_id", "reply_kind", "stage", "turn_id", "member_count", "input_version", "generation_version", "delivery_outcome");
     private final LoggingProperties properties;
     private static final Set<String> CONFIGURATION_NAMES = Set.of("LINE_CHANNEL_SECRET", "LINE_CHANNEL_TOKEN",
             "LINE_INTERNAL_PUSH_TOKEN", "DATABASE_URL", "DATABASE_USERNAME", "DATABASE_PASSWORD",

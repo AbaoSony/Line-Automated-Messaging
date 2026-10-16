@@ -318,8 +318,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         @Bean
         @Primary
         MessagingApiClient localMessagingClient(LocalLineStub stub) {
-            return MessagingApiClient.builder("documentation-test-token").apiEndPoint(stub.endpoint())
-                    .usingDefaultLogger(false).build();
+            return stub.transport.client();
         }
 
         @Bean
@@ -345,6 +344,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         final AtomicReference<String> contentPath = new AtomicReference<>();
         final AtomicReference<String> contentAuthorization = new AtomicReference<>();
         private final HttpServer server;
+        private final com.example.line.client.LineMessagingTransport transport;
 
         LocalLineStub() throws IOException {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -390,9 +390,10 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                 }
             });
             server.start();
+            transport=new com.example.line.client.LineMessagingTransport("documentation-test-token",endpoint());
         }
 
         URI endpoint() { return URI.create("http://127.0.0.1:" + server.getAddress().getPort()); }
-        @Override public void close() { server.stop(0); }
+        @Override public void close() { transport.close();server.stop(0); }
     }
 }

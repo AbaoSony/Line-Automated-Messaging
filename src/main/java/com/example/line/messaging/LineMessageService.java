@@ -77,7 +77,7 @@ public class LineMessageService {
     public void replyText(String replyToken,String text,com.example.line.common.execution.Deadline deadline) {
         if(replyToken==null || replyToken.isBlank())throw new IllegalArgumentException("Missing reply token");
         var request=new ReplyMessageRequest.Builder(replyToken,List.of(LineMessages.text(text))).build();
-        try(var lease=sending(org.slf4j.MDC.get("user_id"),false)) {
+        try(var lease=sending(org.slf4j.MDC.get("user_id"),false);var scope=com.example.line.common.execution.LineSendScope.open(lease)) {
             BusinessLog.write(log,Level.INFO,LogEvents.LINE_REPLY_REQUESTED,"LINE reply requested",BusinessLog.fields("messages",LogData.business(request.messages())));
             caller.execute("reply",null,() -> client.replyMessage(request),deadline);
             BusinessLog.write(log,Level.INFO,LogEvents.LINE_REPLY_SENT,"LINE reply accepted",BusinessLog.fields("outcome","SUCCESS"));
@@ -97,7 +97,7 @@ public class LineMessageService {
             throw new IllegalArgumentException("Missing reply token");
         }
         var request = new ReplyMessageRequest.Builder(replyToken, validateMessages(messages)).build();
-        try(var lease=sending(org.slf4j.MDC.get("user_id"),false)) {
+        try(var lease=sending(org.slf4j.MDC.get("user_id"),false);var scope=com.example.line.common.execution.LineSendScope.open(lease)) {
             BusinessLog.write(log, Level.INFO, LogEvents.LINE_REPLY_REQUESTED, "LINE reply requested",
                     BusinessLog.fields("messages", LogData.business(request.messages())));
             caller.execute("reply", null, () -> client.replyMessage(request));
@@ -136,7 +136,7 @@ public class LineMessageService {
         var request = new PushMessageRequest.Builder(userId, validateMessages(messages)).build();
         // 必须从首次请求就设置 Key，不能等遇到超时后再生成，否则无法去除已执行的重复请求。
         UUID retryKey = UUID.randomUUID();
-        try (var scope = LogContext.user(userId);var lease=sending(userId,true)) {
+        try (var scope = LogContext.user(userId);var lease=sending(userId,true);var transportScope=com.example.line.common.execution.LineSendScope.open(lease)) {
             BusinessLog.write(log, Level.INFO, LogEvents.LINE_PUSH_REQUESTED, "LINE push requested",
                     BusinessLog.fields("messages", LogData.business(request.messages())));
             boolean alreadyAccepted = caller.execute("push", retryKey, () -> client.pushMessage(retryKey, request));
@@ -150,8 +150,8 @@ public class LineMessageService {
         var lease=tracker.register(user);
         if(lease==null) {
             BusinessLog.write(log,Level.WARN,push?LogEvents.LINE_PUSH_FAILED:LogEvents.LINE_REPLY_FAILED,
-                    "LINE send blocked by user work boundary",BusinessLog.fields("outcome","FAILED","reason","user_work_blocked"));
-            throw new LineSendException(LineSendException.Reason.TRANSIENT_FAILURE,null);
+                    "LINE send blocked by user work boundary",BusinessLog.fields("outcome","FAILED","reason","user_work_blocked","delivery_outcome",LineSendException.DeliveryOutcome.NOT_SENT));
+            throw new LineSendException(LineSendException.Reason.TRANSIENT_FAILURE,null,LineSendException.DeliveryOutcome.NOT_SENT);
         }
         return lease;
     }

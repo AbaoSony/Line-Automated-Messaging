@@ -1,0 +1,15 @@
+{
+  "event": "line.reply.failed",
+  "level": "ERROR",
+  "webhook_event_id": "fictional-p2-unknown-event-1",
+  "user_id": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx4",
+  "outcome": "FAILED",
+  "http_status": 503,
+  "error_type": "MessagingApiClientException",
+  "detail": {
+    "operation": "reply",
+    "attempt": 1,
+    "retry": false,
+    "delivery_outcome": "UNKNOWN"
+  }
+}

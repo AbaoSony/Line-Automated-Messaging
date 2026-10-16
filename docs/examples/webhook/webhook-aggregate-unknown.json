@@ -1,0 +1,43 @@
+{
+  "destination": "Uyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+  "events": [
+    {
+      "type": "message",
+      "mode": "active",
+      "timestamp": 1792108800001,
+      "webhookEventId": "fictional-p2-unknown-event-1",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "replyToken": "REPLY_TOKEN_PLACEHOLDER_UNKNOWN_1",
+      "source": {
+        "type": "user",
+        "userId": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx4"
+      },
+      "message": {
+        "type": "text",
+        "id": "fictional-p2-unknown-message-1",
+        "text": "完整虛構第一則"
+      }
+    },
+    {
+      "type": "message",
+      "mode": "active",
+      "timestamp": 1792108800002,
+      "webhookEventId": "fictional-p2-unknown-event-2",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "replyToken": "REPLY_TOKEN_PLACEHOLDER_UNKNOWN_2",
+      "source": {
+        "type": "user",
+        "userId": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx4"
+      },
+      "message": {
+        "type": "text",
+        "id": "fictional-p2-unknown-message-2",
+        "text": "完整虛構第二則？"
+      }
+    }
+  ]
+}

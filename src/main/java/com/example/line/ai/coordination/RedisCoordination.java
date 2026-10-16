@@ -73,6 +73,11 @@ public class RedisCoordination {
      * @param user 完整用户
      * @param owner 当前持有者
      */
-    public void release(String user,String owner) { redis.execute(RELEASE,List.of(key(user,"lock")),owner); }
+    public void release(String user,String owner) {
+        // 取消标记不能让 Lettuce 在真正执行清理前立即中断；租约须覆盖本次有超时边界的释放，并恢复调用方标记。
+        boolean interrupted=Thread.interrupted();
+        try {redis.execute(RELEASE,List.of(key(user,"lock")),owner);}
+        finally {if(interrupted)Thread.currentThread().interrupt();}
+    }
     private String key(String user,String suffix) { return memory.namespace()+":{"+user+"}:"+suffix; }
 }

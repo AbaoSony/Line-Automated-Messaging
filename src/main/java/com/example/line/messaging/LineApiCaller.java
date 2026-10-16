@@ -77,9 +77,12 @@ public class LineApiCaller {
         int attempts = pushRetryKey == null ? 1 : properties.maxAttempts();
         for (int attempt = 1; attempt <= attempts; attempt++) {
             CompletableFuture<?> future = null;
+            boolean initiated=false;
             try {
+                if(Thread.currentThread().isInterrupted())throw new InterruptedException();
                 var wait=deadline==null?properties.attemptTimeout():deadline.limit(properties.attemptTimeout());
                 if(wait.isZero())throw new TimeoutException();
+                initiated=true;
                 future = request.get();
                 if(deadline!=null)wait=deadline.limit(wait);
                 if(wait.isZero())throw new TimeoutException();
@@ -89,8 +92,10 @@ public class LineApiCaller {
                 if (future != null) future.cancel(true);
                 Thread.currentThread().interrupt();
                 BusinessLog.failure(log, Level.ERROR, pushRetryKey == null ? LogEvents.LINE_REPLY_FAILED : LogEvents.LINE_PUSH_FAILED,
-                        "LINE send interrupted", e, BusinessLog.fields("operation", operation, "outcome", "FAILED", "attempt", attempt));
-                throw new LineSendException(LineSendException.Reason.INTERRUPTED, null);
+                        "LINE send interrupted", e, BusinessLog.fields("operation", operation, "outcome", "FAILED", "attempt", attempt,
+                                "delivery_outcome",initiated?LineSendException.DeliveryOutcome.UNKNOWN:LineSendException.DeliveryOutcome.NOT_SENT));
+                throw new LineSendException(LineSendException.Reason.INTERRUPTED, null,
+                        initiated?LineSendException.DeliveryOutcome.UNKNOWN:LineSendException.DeliveryOutcome.NOT_SENT);
             } catch (Exception e) {
                 // 取消 Future 只减少本地等待，不证明 LINE 未执行；Push 后续仍须使用相同 Key。
                 if (e instanceof TimeoutException && future != null) future.cancel(true);
@@ -108,21 +113,23 @@ public class LineApiCaller {
                         ? LineSendException.Reason.CLIENT_ERROR
                         : transientError ? LineSendException.Reason.TRANSIENT_FAILURE
                         : LineSendException.Reason.UNEXPECTED_FAILURE;
-                boolean retry = transientError && attempt < attempts;
+                var outcome=!initiated?LineSendException.DeliveryOutcome.NOT_SENT
+                        : reason==LineSendException.Reason.CLIENT_ERROR?LineSendException.DeliveryOutcome.REJECTED:LineSendException.DeliveryOutcome.UNKNOWN;
+                boolean retry = initiated && transientError && attempt < attempts;
                 // 不输出原始异常消息或堆栈，SDK 错误可能包含请求正文或服务端回显内容。
                 BusinessLog.failure(log, retry ? Level.WARN : Level.ERROR,
                         retry ? LogEvents.LINE_RETRY : pushRetryKey == null ? LogEvents.LINE_REPLY_FAILED : LogEvents.LINE_PUSH_FAILED,
                         "LINE send failed", failure, BusinessLog.fields("operation", operation, "http_status", status,
-                                "attempt", attempt, "retry", retry, "outcome", "FAILED"));
-                if (!retry) throw new LineSendException(reason, status);
+                                "attempt", attempt, "retry", retry, "outcome", "FAILED","delivery_outcome",outcome));
+                if (!retry) throw new LineSendException(reason, status,outcome);
                 try {
                     // 默认首次失败等 200ms、再次失败等 400ms；二倍增长且次数有界，避免故障期紧密重试。
                     sleeper.sleep(properties.initialBackoff().toMillis() * (1L << (attempt - 1)));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     BusinessLog.failure(log, Level.ERROR, LogEvents.LINE_PUSH_FAILED, "LINE retry interrupted", interrupted,
-                            BusinessLog.fields("operation", operation, "http_status", status, "attempt", attempt, "outcome", "FAILED"));
-                    throw new LineSendException(LineSendException.Reason.INTERRUPTED, status);
+                            BusinessLog.fields("operation", operation, "http_status", status, "attempt", attempt, "outcome", "FAILED","delivery_outcome",outcome));
+                    throw new LineSendException(LineSendException.Reason.INTERRUPTED, status,outcome);
                 }
             }
         }

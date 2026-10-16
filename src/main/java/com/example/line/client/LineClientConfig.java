@@ -30,11 +30,20 @@ public class LineClientConfig {
     /**
      * 创建消息客户端，供 LineMessageService 执行 Reply 与 Push。
      *
-     * @param properties 已校验的必填凭证配置，Access Token 来源为 LINE_CHANNEL_TOKEN 或外部配置
+     * @param lineMessagingTransport 已关闭隐式重放并跟踪清理的官方 SDK 传输
      * @return 关闭默认 HTTP 报文日志的 Messaging API 客户端；创建时不验证远端凭证
      */
     @Bean
-    public MessagingApiClient messagingApiClient(LineProperties properties) {
-        return MessagingApiClient.builder(properties.getChannelToken()).usingDefaultLogger(false).build();
+    public MessagingApiClient messagingApiClient(LineMessagingTransport lineMessagingTransport) {
+        return lineMessagingTransport.client();
+    }
+    /**
+     * 创建由容器负责关闭的消息传输，固定生产域名并关闭底层重放及报文日志。
+     * @param properties 外部 LINE 凭证
+     * @return 官方 SDK 接口的受控传输
+     */
+    @Bean(destroyMethod="close")
+    public LineMessagingTransport lineMessagingTransport(LineProperties properties) {
+        return new LineMessagingTransport(properties.getChannelToken(),java.net.URI.create("https://api.line.me"));
     }
 }

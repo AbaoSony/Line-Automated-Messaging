@@ -77,6 +77,18 @@ public class UserWorkTracker {
         private final Slot slot;
         private boolean closed;
         private Lease(String user, Slot slot) { this.user = user; this.slot = slot; }
+        /**
+         * 延续已准入工作的实际传输清理，不把删除后新任务伪装成旧任务。
+         * @return 与当前工作同代次的独立子租约
+         * @throws IllegalStateException 当前租约已经关闭时抛出
+         */
+        public Lease retain() {
+            synchronized(UserWorkTracker.this) {
+                if(closed)throw new IllegalStateException("User work lease already closed");
+                if(slot!=null)slot.pending++;
+                return new Lease(user,slot);
+            }
+        }
         /** 释放当前工作，唤醒等待中的删除；重复关闭安全。 */
         @Override public void close() {
             synchronized (UserWorkTracker.this) {

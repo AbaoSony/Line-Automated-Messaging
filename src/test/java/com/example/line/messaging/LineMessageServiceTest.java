@@ -34,7 +34,8 @@ class LineMessageServiceTest {
             assertThat(entered.await(1,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             try(var barrier=tracker.block(user)) {
                 assertThatThrownBy(() -> barrier.await(Duration.ofMillis(1))).hasMessageContaining("timed out");
-                assertThatThrownBy(() -> service.pushText(user,"删除期间不得发送")).isInstanceOf(LineSendException.class);
+                assertThatThrownBy(() -> service.pushText(user,"删除期间不得发送")).isInstanceOfSatisfying(LineSendException.class,
+                        failure -> assertThat(failure.getDeliveryOutcome()).isEqualTo(LineSendException.DeliveryOutcome.NOT_SENT));
                 accepted.complete(null);sending.get(1,java.util.concurrent.TimeUnit.SECONDS);
                 barrier.await(Duration.ofSeconds(1));
             }
