@@ -25,10 +25,22 @@ public class ContextComposer {
      * @throws ModelFailure 人设加当前输入本身超限时抛出
      */
     public List<ChatRequest.HistoryMessage> compose(String prompt, String current, List<PrivateHistory.Turn> turns) {
-        int base = cost(prompt) + cost(current);
+        return composeMembers(prompt, List.of(current), turns);
+    }
+    /**
+     * 每个当前成员分别计入角色开销，超限只裁剪完整旧轮，不删除当前成员。
+     * @param prompt 完整人设
+     * @param current 全部有序用户原文
+     * @param turns 已接受的完整旧轮
+     * @return 保留的完整历史，当前成员由适配器逐条加入
+     * @throws ModelFailure 当前成员及人设已经超限时抛出
+     */
+    public List<ChatRequest.HistoryMessage> composeMembers(String prompt, List<String> current, List<PrivateHistory.Turn> turns) {
+        long base = cost(prompt);
+        for (String text : current) base += cost(text);
         if (base > properties.maxInputTokens()) throw new ModelFailure("input_too_long");
         int start = turns.size();
-        int used = base;
+        long used = base;
         while (start > 0) {
             var turn = turns.get(start-1);
             int next = cost(turn.userText()) + cost(turn.assistantText());

@@ -50,11 +50,12 @@ public final class OpenAiChatModelClient implements ChatModelClient {
                 begin + properties.totalTimeout().toNanos()), request.deadline().clock());
         var input = new ArrayList<ResponseInputItem>();
         for (var message : request.history()) input.add(item(message.role(), message.content()));
-        input.add(item("user", request.userMessage()));
+        for (String message : request.currentMessages()) input.add(item("user", message));
         var params = ResponseCreateParams.builder().model(properties.name()).instructions(request.systemPrompt())
                 .inputOfResponse(input).maxOutputTokens(properties.maxOutputTokens()).store(false)
                 .reasoning(Reasoning.builder().effort(ReasoningEffort.of(properties.reasoning())).build()).build();
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            if (Thread.currentThread().isInterrupted()) throw new ModelFailure("interrupted");
             if (!deadline.permits(Duration.ofMillis(1))) throw new ModelFailure("deadline");
             Duration timeout = deadline.limit(properties.attemptTimeout());
             long started = System.nanoTime();
@@ -96,7 +97,8 @@ public final class OpenAiChatModelClient implements ChatModelClient {
                 boolean retryable = status != null ? status >= 500 && status <= 599
                         : cause instanceof OpenAIIoException || cause instanceof TimeoutException;
                 meters.counter("ai.attempt.failed", "reason", status != null ? "http" : kind).increment();
-                boolean retry = retryable && attempt < MAX_ATTEMPTS && deadline.permits(properties.retryBackoff().plusMillis(1));
+                boolean retry = retryable && attempt < MAX_ATTEMPTS && deadline.permits(properties.retryBackoff().plusMillis(1))
+                        && request.reserveRetry().getAsBoolean();
                 BusinessLog.write(LoggerFactory.getLogger(getClass()), Level.WARN, LogEvents.AI_GENERATE_RETRY,
                         "Model attempt failed", BusinessLog.fields("attempt", attempt, "retry", retry, "error_type", kind,
                                 "http_status", status, "outcome", "FAILED", "duration_ms", (System.nanoTime()-started)/1_000_000));

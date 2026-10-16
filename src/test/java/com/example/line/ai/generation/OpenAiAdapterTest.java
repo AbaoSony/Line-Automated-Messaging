@@ -144,6 +144,26 @@ class OpenAiAdapterTest {
         assertThat(adapter(GenerationPolicyTest.settings(8192)).generate(request(Duration.ofSeconds(3))).text()).isEqualTo("虛構模型回覆");
         assertThat(calls.get()).isEqualTo(2);assertThat(requests.poll()).isEqualTo(requests.poll());
     }
+    @Test void aggregatedMembersReachSdkAsSeparateOrderedUserMessagesWithoutSyntheticAssistant() throws Exception {
+        var original=request(Duration.ofSeconds(3));
+        var current=List.of("完整第一則\n換行","完整第二則","完整第三則？");
+        var aggregated=new ChatRequest(original.systemPrompt(),original.history(),current.get(0),original.messageId(),
+                original.correlationId(),original.occurredAt(),original.deadline(),current,() -> true);
+        adapter(GenerationPolicyTest.settings(8192)).generate(aggregated);
+        var sent=requests.poll(2,TimeUnit.SECONDS);assertThat(sent.path("input")).hasSize(5);
+        for(int i=0;i<current.size();i++) {
+            assertThat(sent.path("input").get(i+2).path("role").asText()).isEqualTo("user");
+            assertThat(sent.path("input").get(i+2).path("content").asText()).isEqualTo(current.get(i));
+        }
+    }
+    @Test void exhaustedSharedTurnAllowancePreventsAdapterFromAddingItsOwnNetworkRetry() {
+        statuses.add(503);statuses.add(200);var original=request(Duration.ofSeconds(3));
+        var aggregated=new ChatRequest(original.systemPrompt(),original.history(),original.userMessage(),original.messageId(),
+                original.correlationId(),original.occurredAt(),original.deadline(),original.currentMessages(),() -> false);
+        assertThatThrownBy(() -> adapter(GenerationPolicyTest.settings(8192)).generate(aggregated))
+                .isInstanceOf(ModelFailure.class).hasMessage("http_503");
+        assertThat(calls.get()).isEqualTo(1);assertThat(requests).hasSize(1);
+    }
     @Test void exhaustedServerFailureStopsAfterTwoAttempts(){
         statuses.add(503);statuses.add(503);statuses.add(200);
         assertThatThrownBy(() -> adapter(GenerationPolicyTest.settings(8192)).generate(request(Duration.ofSeconds(3))))

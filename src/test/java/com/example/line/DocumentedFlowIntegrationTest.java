@@ -66,6 +66,8 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private com.example.line.common.logging.EventRecorder eventRecorder;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.example.line.ai.decision.RuleTimingPolicy rules;
 
     // 场景：完整验证验签、echo、事件去重、四类兜底、内容下载、Push 同 Key 重试与已接受冲突。
     @Test
@@ -242,6 +244,42 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE trace_id=? AND event='ai.generate.failed'",Integer.class,silentResponse.getHeaders().getFirst("X-Trace-Id"))).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE trace_id=? AND event='ai.fallback.used'",Integer.class,silentResponse.getHeaders().getFirst("X-Trace-Id"))).isZero();
         assertThat(send(silent,true).getStatusCode()).isEqualTo(HttpStatus.OK);awaitWorkers();assertThat(stub.replies).isEmpty();
+        documentedThreeMemberAggregationMatchesItsReplyExample(logs);
+    }
+
+    private void documentedThreeMemberAggregationMatchesItsReplyExample(CapturedOutput logs) throws Exception {
+        var entered=new java.util.concurrent.CountDownLatch(1);
+        var release=new java.util.concurrent.CountDownLatch(1);
+        var first=new java.util.concurrent.atomic.AtomicBoolean(true);
+        var calls=new java.util.concurrent.atomic.AtomicInteger();
+        var current=new AtomicReference<com.example.line.ai.generation.ChatRequest>();
+        org.mockito.Mockito.doAnswer(call -> {
+            if(first.compareAndSet(true,false)) {entered.countDown();assertThat(release.await(3,TimeUnit.SECONDS)).isTrue();}
+            return call.callRealMethod();
+        }).when(rules).decide(org.mockito.ArgumentMatchers.anyList(),org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.doAnswer(call -> {
+            calls.incrementAndGet();current.set(call.getArgument(0));
+            return new com.example.line.ai.generation.ChatResult("完整虛構聚合回覆","gpt-6.1-sol",10,10,1,"COMPLETED");
+        }).when(testModel).generate(org.mockito.ArgumentMatchers.any());
+        byte[] body=Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-aggregate-three.json"));
+        var events=mapper.readTree(body).path("events");String user=events.get(0).path("source").path("userId").asText();
+        try {
+            assertThat(send(body,true).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
+            await().atMost(Duration.ofSeconds(3)).until(() -> jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='INBOUND'",Integer.class,user)==3);
+            release.countDown();var sent=stub.replies.poll(5,TimeUnit.SECONDS);assertThat(sent).isNotNull();
+            assertThat(sent.body()).isEqualTo(readJson("reply/reply-aggregate-three-request.json"));
+            awaitWorkers();awaitPersistence();await().atMost(Duration.ofSeconds(5)).until(eventRecorder::isIdle);
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(current.get().currentMessages()).containsExactly(events.get(0).path("message").path("text").asText(),
+                    events.get(1).path("message").path("text").asText(),events.get(2).path("message").path("text").asText());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isEqualTo(1);
+            for(var event:events)assertThat(jdbc.queryForObject("SELECT content->>'text' FROM chat_message WHERE line_message_id=?",String.class,
+                    event.path("message").path("id").asText())).isEqualTo(event.path("message").path("text").asText());
+            assertThat(send(body,true).getStatusCode()).isEqualTo(HttpStatus.OK);awaitWorkers();assertThat(stub.replies).isEmpty();
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(logs).doesNotContain("REPLY_TOKEN_PLACEHOLDER_P2_1","REPLY_TOKEN_PLACEHOLDER_P2_2","REPLY_TOKEN_PLACEHOLDER_P2_3");
+        } finally {release.countDown();}
     }
 
     private ResponseEntity<String> send(byte[] body, boolean correctSignature) throws Exception {

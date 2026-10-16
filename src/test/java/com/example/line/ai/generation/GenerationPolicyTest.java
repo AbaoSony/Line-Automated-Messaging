@@ -38,4 +38,12 @@ class GenerationPolicyTest {
         assertThatThrownBy(() -> new ModelProperties("gpt-6.1-sol","low",0.2,8192,1024,Duration.ofSeconds(8),Duration.ofSeconds(4),Duration.ofSeconds(1),Duration.ofMillis(1)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void multiMemberBudgetChargesEachUserBoundaryAndNeverDropsCurrentMembersToFit() {
+        var current=List.of("第一則完整原文","第二則完整原文");
+        assertThatThrownBy(() -> new ContextComposer(settings(200)).composeMembers("system",current,List.of()))
+                .isInstanceOf(ModelFailure.class).hasMessage("input_too_long");
+        assertThat(current).containsExactly("第一則完整原文","第二則完整原文");
+        var old=new PrivateHistory.Turn("old","old","舊".repeat(100),"舊回覆",Instant.EPOCH,Instant.EPOCH,1);
+        assertThat(new ContextComposer(settings(300)).composeMembers("system",current,List.of(old))).isEmpty();
+    }
 }

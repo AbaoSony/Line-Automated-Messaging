@@ -1,0 +1,62 @@
+{
+  "destination": "Uyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+  "events": [
+    {
+      "type": "message",
+      "mode": "active",
+      "timestamp": 1792108800001,
+      "webhookEventId": "fictional-p2-event-1",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "replyToken": "REPLY_TOKEN_PLACEHOLDER_P2_1",
+      "source": {
+        "type": "user",
+        "userId": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx3"
+      },
+      "message": {
+        "type": "text",
+        "id": "fictional-p2-message-1",
+        "text": "等我一下我想說"
+      }
+    },
+    {
+      "type": "message",
+      "mode": "active",
+      "timestamp": 1792108800002,
+      "webhookEventId": "fictional-p2-event-2",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "replyToken": "REPLY_TOKEN_PLACEHOLDER_P2_2",
+      "source": {
+        "type": "user",
+        "userId": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx3"
+      },
+      "message": {
+        "type": "text",
+        "id": "fictional-p2-message-2",
+        "text": "完整第二則保留\n換行"
+      }
+    },
+    {
+      "type": "message",
+      "mode": "active",
+      "timestamp": 1792108800003,
+      "webhookEventId": "fictional-p2-event-3",
+      "deliveryContext": {
+        "isRedelivery": false
+      },
+      "replyToken": "REPLY_TOKEN_PLACEHOLDER_P2_3",
+      "source": {
+        "type": "user",
+        "userId": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx3"
+      },
+      "message": {
+        "type": "text",
+        "id": "fictional-p2-message-3",
+        "text": "就這些？"
+      }
+    }
+  ]
+}

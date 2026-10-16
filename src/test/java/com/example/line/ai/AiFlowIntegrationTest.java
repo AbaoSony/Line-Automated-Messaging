@@ -37,7 +37,7 @@ import static org.mockito.Mockito.*;
 /** 用完整虚构 HTTP 私聊验证 AI、角色历史、分类出站、故障隔离、凭证禁记和并发删除屏障。 */
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
         "line.bot.channel-secret=fake-ai-flow-secret","line.bot.channel-token=fake-ai-flow-token","line.send.attempt-timeout=100ms",
-        "line.ai.technical-replies-enabled=true"})
+        "line.ai.technical-replies-enabled=true","line.ai.turns.enabled=false"})
 @ExtendWith(OutputCaptureExtension.class)
 class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     @Autowired private TestRestTemplate http;

@@ -35,6 +35,23 @@ spring:
 
 line:
   ai:
+    turns:
+      enabled: ${AI_AGGREGATION_ENABLED:true}
+    aggregation:
+      collection-span: ${AI_AGGREGATION_COLLECTION_SPAN:6s}
+      queue-reserve: ${AI_AGGREGATION_QUEUE_RESERVE:3s}
+      dependency-reserve: ${AI_AGGREGATION_DEPENDENCY_RESERVE:1s}
+      generation-reserve: ${AI_AGGREGATION_GENERATION_RESERVE:32s}
+      rule-wait: ${AI_AGGREGATION_RULE_WAIT:1s}
+      max-members: ${AI_AGGREGATION_MAX_MEMBERS:8}
+      max-characters: ${AI_AGGREGATION_MAX_CHARACTERS:4096}
+      max-buffered-members: ${AI_AGGREGATION_MAX_BUFFERED_MEMBERS:2048}
+      max-buffered-characters: ${AI_AGGREGATION_MAX_BUFFERED_CHARACTERS:2000000}
+      max-regenerations: ${AI_AGGREGATION_MAX_REGENERATIONS:1}
+      max-generation-attempts: ${AI_AGGREGATION_MAX_GENERATION_ATTEMPTS:2}
+    decision:
+      mode: ${AI_DECISION_MODE:RULE}
+      technical-reply-cooldown: ${AI_TECHNICAL_REPLY_COOLDOWN:10s}
     total-timeout: ${AI_TOTAL_TIMEOUT:45s}
     send-reserve: ${AI_SEND_RESERVE:3s}
     queue-wait: ${AI_QUEUE_WAIT:3s}

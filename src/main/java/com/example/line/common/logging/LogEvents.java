@@ -4,6 +4,9 @@ import java.util.Set;
 
 /** 固定事件名登记表，供业务日志与 EventRecorder 共用；新增名称及使用状态需同步 docs/日志规范.md。 */
 public final class LogEvents {
+    public static final String AI_TURN_ADMITTED = "ai.turn.admitted";
+    public static final String AI_TURN_DECIDED = "ai.turn.decided";
+    public static final String AI_TURN_COMPLETED = "ai.turn.completed";
     public static final String AI_GENERATE_REQUESTED = "ai.generate.requested";
     public static final String AI_GENERATE_RETRY = "ai.generate.retry";
     public static final String AI_QUEUE_REJECTED = "ai.queue.rejected";
@@ -55,7 +58,7 @@ public final class LogEvents {
      * @return 已登记且非空时返回 true
      */
     public static boolean isRegistered(String event) { return event != null && (REGISTERED.contains(event)
-            || Set.of(AI_GENERATE_REQUESTED,AI_GENERATE_RETRY,AI_QUEUE_REJECTED,AI_DEPENDENCY_FAILED,AI_REPLY_SKIPPED).contains(event)); }
+            || Set.of(AI_TURN_ADMITTED,AI_TURN_DECIDED,AI_TURN_COMPLETED,AI_GENERATE_REQUESTED,AI_GENERATE_RETRY,AI_QUEUE_REJECTED,AI_DEPENDENCY_FAILED,AI_REPLY_SKIPPED).contains(event)); }
 
     private LogEvents() {}
 }

@@ -92,3 +92,15 @@ IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成
 默认 AI_TECHNICAL_REPLIES_ENABLED=false，生成失败、忙碌、限流、服务故障、输入过长不发提示；正常 AI 回复照常发送。原始入站/错误日志保留，静默任务不生成成功出站、不进正常上下文、不自动补答，去重仍完成。需要恢复提示时显式设 true 并重启。
 
 [完整虚构入站](webhook-silent-technical.json) 与 [静默事件行](ai-reply-skipped.json) 由 DocumentedFlowIntegrationTest 对比实际数据库结果；故意模拟模型超时，确认 HTTP 200、保留原文、无 Reply、重投递不补发。AiFlowIntegrationTest 保留开启模式的原有严格出站断言，另测关闭模式下全部分类、队列满/过期、锁等待、正常在途任务继续完成，以及失败指标和事件没有丢失。示例中的 UUID、用户、凭证和消息均为虚构。
+
+
+## P2 第三阶段规则聚合示例（全部虚构，已实现）
+
+`webhook-aggregate-three.json` 含同用户有序三条完整文本，`../reply/reply-aggregate-three-request.json` 是模型替身返回「完整虛構聚合回覆」时的一次出站。所有标识和凭证占位符均虚构，不能发往真实 LINE 作为凭证使用。
+
+1. 使用测试专用 Secret 对原始文件字节生成 X-Line-Signature，提交本地测试 HTTP 入口；线上 Secret 不写入文件。
+2. 测试屏障保证三条在首次正文快照前完成准入，DocumentedFlowIntegrationTest 比对三个独立 user 输入、全部原文入站、一条出站及末条有效凭证。
+3. 等待执行/持久化/日志队列排空，再重投递相同事件，断言不生成、不再次 Reply；输出和日志不能包含三个凭证占位符。
+4. 普通运行的连发会受实际时机、固定截止、容量和一次撤销额度影响，可能形成待处理轮次；不能把这个可控轨迹当作所有连发都只调用一次模型的保证。
+
+多成员过渡出站 content.ai_turn 保存完整成员，in_reply_to_message_id=null；第五阶段关联表完成前，该轮不进入后续上下文。单成员原有示例与断言继续有效。MODEL 时机判断尚未实现，当前用 AI_DECISION_MODE=RULE；技术兜底仍默认静默。

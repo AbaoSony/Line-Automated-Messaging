@@ -1,6 +1,9 @@
 package com.example.line.ai.generation;
 
 import com.example.line.ai.AiProperties;
+import com.example.line.ai.TurnFlowProperties;
+import com.example.line.ai.aggregation.AggregationProperties;
+import com.example.line.ai.decision.DecisionProperties;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.LogLevel;
@@ -11,7 +14,8 @@ import org.springframework.context.annotation.Configuration;
 
 /** 装配唯一官方模型客户端，明确关闭 SDK 重试和 HTTP 报文日志。 */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({ModelProperties.class,ApiCredentials.class,AiProperties.class})
+@EnableConfigurationProperties({ModelProperties.class,ApiCredentials.class,AiProperties.class,
+        TurnFlowProperties.class,AggregationProperties.class,DecisionProperties.class})
 class GenerationConfig {
     @Bean(destroyMethod = "close")
     OpenAIClient openAIClient(ApiCredentials credentials, ModelProperties properties) {

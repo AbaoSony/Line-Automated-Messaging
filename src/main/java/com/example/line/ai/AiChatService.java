@@ -23,6 +23,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class AiChatService {
     private final AiProperties properties;
+    private final AggregatedChatFlow aggregated;
+    private final TurnFlowProperties turnMode;
     private final SessionScheduler scheduler;
     private final RedisCoordination coordination;
     private final ConversationMemory memory;
@@ -50,13 +52,16 @@ public class AiChatService {
      * @param dependencies 有界依赖查询
      * @param meters 指标
      * @param mapper 业务 JSON
+     * @param aggregated P2 规则聚合入口
+     * @param turnMode 显式单条兼容开关
      */
     public AiChatService(AiProperties properties,SessionScheduler scheduler,RedisCoordination coordination,
                          ConversationMemory memory,ChatModelClient model,PersonaLoader persona,ContextComposer composer,
                          ChatMessageService chat,LineMessageService messages,UserWorkTracker tracker,
-                         DependencyCalls dependencies,MeterRegistry meters,ObjectMapper mapper) {
+                         DependencyCalls dependencies,MeterRegistry meters,ObjectMapper mapper,AggregatedChatFlow aggregated,TurnFlowProperties turnMode) {
         this.properties=properties;this.scheduler=scheduler;this.coordination=coordination;this.memory=memory;
         this.model=model;this.persona=persona;this.composer=composer;this.chat=chat;this.messages=messages;
+        this.aggregated=aggregated;this.turnMode=turnMode;
         this.tracker=tracker;this.dependencies=dependencies;this.meters=meters;this.mapper=mapper;
     }
     /**
@@ -66,8 +71,9 @@ public class AiChatService {
      * @return 当前处理终态，已成功 Reply 后缓存失败仍正常完成
      */
     public CompletionStage<Void> submit(AiInput input,String replyToken) {
-        Deadline deadline=Deadline.current(properties.totalTimeout());
-        var lease=tracker.register(input.userId());
+        if(turnMode.enabled()) return aggregated.submit(input,replyToken);
+        Deadline deadline=Deadline.current(properties.totalTimeout());//接收到的时间 or 当前时间
+        var lease=tracker.register(input.userId()); //同步锁控制用户线程
         if(lease==null) {skipped("deletion_barrier");return CompletableFuture.completedFuture(null);}
         chat.recordMessage(input.userId(),"INBOUND",input.messageId(),"TEXT",input.content(),
                 input.occurredAt(),metadata(input,"LEGACY",null));
