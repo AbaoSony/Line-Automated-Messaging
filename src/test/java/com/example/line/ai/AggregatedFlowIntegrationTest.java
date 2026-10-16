@@ -87,11 +87,13 @@ class AggregatedFlowIntegrationTest extends PostgresIntegrationSupport {
             for(int i=0;i<3;i++)send(user,List.of("aggregate-first","aggregate-second","aggregate-third").get(i),texts.get(i));
             drain();verify(testModel).generate(any());verify(line).replyMessage(any());
             send(user,"aggregate-followup","後續問題？");drain();
-            assertThat(captured).hasSize(2);assertThat(captured.get(1).history()).isEmpty();
+            assertThat(captured).hasSize(2);assertThat(captured.get(1).history()).containsExactly(
+                    new ChatRequest.HistoryMessage("user",texts.get(0)),new ChatRequest.HistoryMessage("user",texts.get(1)),
+                    new ChatRequest.HistoryMessage("user",texts.get(2)),new ChatRequest.HistoryMessage("assistant","完整虛構聚合回覆"));
             assertThat(logs).contains("完整第二則保留","ai.turn.completed").doesNotContain("fictional-aggregate-secret","fictional-aggregate-access","fictional-reply-");
             deletion.deleteAll(user);drain();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=?",Integer.class,user)).isZero();
-            assertThat(redis.hasKey(key(user,"context"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
+            assertThat(redis.hasKey(key(user,"context-v2"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
         } finally { release.countDown(); }
     }
     @Test void rateLimitCountsEachMessageBeforeAdmissionAndRejectedCredentialCannotReplaceAcceptedMember() throws Exception {
@@ -162,7 +164,7 @@ class AggregatedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(captured.get().history()).isEmpty();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event='ai.fallback.used'",Integer.class,user)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND' AND reply_kind='FALLBACK' AND model_name IS NULL",Integer.class,user)).isEqualTo(1);
-        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain(ai.fallback());
+        assertThat(redis.opsForValue().get(key(user,"context-v2"))).doesNotContain(ai.fallback());
     }
     @Test void deletionWaitsForActualCancelledModelExitAndPreventsOldReplyAndWriteback() throws Exception {
         String user=user();var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
@@ -177,7 +179,7 @@ class AggregatedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThatThrownBy(() -> deletionResult.get(150,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
             release.countDown();deletionResult.get(5,TimeUnit.SECONDS);drain();verifyNoInteractions(line);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=?",Integer.class,user)).isZero();
-            assertThat(redis.hasKey(key(user,"context"))).isFalse();
+            assertThat(redis.hasKey(key(user,"context-v2"))).isFalse();
         } finally { release.countDown(); }
     }
     private void holdFirstRule(CountDownLatch entered,CountDownLatch release) {

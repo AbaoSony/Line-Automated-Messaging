@@ -90,7 +90,7 @@ public class AggregatedChatFlow {
         if (lease==null) return CompletableFuture.completedStage(null);
         InboundMember member;
         try { member=new InboundMember(input.userId(),input.correlationId(),input.messageId(),input.text(),input.occurredAt(),
-                input.receivedAt(),input.sequence(),Optional.ofNullable(MDC.get("trace_id")).orElseGet(() -> UUID.randomUUID().toString())); }
+                input.receivedAt(),input.sequence(),Optional.ofNullable(MDC.get("trace_id")).orElseGet(() -> UUID.randomUUID().toString()),input.content()); }
         catch (IllegalArgumentException | NullPointerException failure) {
             lease.close(); dependencyFailure("invalid_input",failure); return CompletableFuture.completedStage(null);
         }

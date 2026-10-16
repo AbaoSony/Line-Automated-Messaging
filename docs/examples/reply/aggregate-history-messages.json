@@ -1,0 +1,18 @@
+[
+  {
+    "role": "user",
+    "content": "等我一下我想說"
+  },
+  {
+    "role": "user",
+    "content": "完整第二則保留\n換行"
+  },
+  {
+    "role": "user",
+    "content": "就這些？"
+  },
+  {
+    "role": "assistant",
+    "content": "完整虛構聚合回覆"
+  }
+]

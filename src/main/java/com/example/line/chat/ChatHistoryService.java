@@ -4,7 +4,7 @@ import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
-/** 提供通用历史及 AI 私聊配对快照；PostgreSQL 是持久化权威来源。 */
+/** 提供通用历史及 AI 私聊完整成功轮次；PostgreSQL 权威关联验证全部成员，绝不返回残缺轮次。 */
 @Service
 @EnableConfigurationProperties(ChatProperties.class)
 public class ChatHistoryService {
@@ -37,12 +37,12 @@ public class ChatHistoryService {
     }
 
     /**
-     * 查询快照之前的有界私聊历史，关联配对并排除旧未知来源、当前和后续消息。
+     * 查询快照之前的有界完整私聊轮次，验证成员连续性并排除旧未知来源、全部当前和后续消息。
      * @param userId 完整私聊用户
      * @param currentId 当前入站消息 ID
      * @param receivedAt 当前接收时间
      * @param sequence 同时刻接收顺序
-     * @param scanLimit 最多扫描条数，不代表轮数
+     * @param scanLimit 消息预算，每轮全部成员加唯一回复一起计数，不代表轮数
      * @return 完整轮次与上一条已知私聊入站时间
      * @throws IllegalArgumentException 查询边界无效时抛出
      * @throws org.springframework.dao.DataAccessException 读取失败时抛出

@@ -25,7 +25,7 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
             """,Long.class);
     private static final DefaultRedisScript<Long> PURGE = new DefaultRedisScript<>("""
             if redis.call('exists',KEYS[1]) == 1 then return 0 end
-            redis.call('del',KEYS[2],KEYS[3]); return 1
+            redis.call('del',KEYS[2],KEYS[3],KEYS[4]); return 1
             """,Long.class);
     private final StringRedisTemplate redis;
     private final MemoryProperties properties;
@@ -57,7 +57,7 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
      */
     @Override public PrivateHistory load(String user,String messageId,Instant received,long sequence,String owner,
                                         com.example.line.common.execution.Deadline deadline) {
-        String cached = redis.opsForValue().get(key(user,"context"));
+        String cached = redis.opsForValue().get(key(user,"context-v2"));
         PrivateHistory stored;
         if (cached == null) {
             BusinessLog.write(LoggerFactory.getLogger(getClass()),Level.DEBUG,LogEvents.MEMORY_CACHE_MISS,
@@ -65,7 +65,7 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
             stored=history.findPrivate(user,messageId,received,sequence,properties.scanLimit());
             // 回源只回填已持久化内容；串行持有者随后用原子 SAVE 写入新轮。
             if(!deadline.permits(java.time.Duration.ZERO) || Thread.currentThread().isInterrupted())throw new IllegalStateException("History deadline exceeded");
-            Long filled=redis.execute(SAVE,List.of(key(user,"lock"),key(user,"context")),owner,
+            Long filled=redis.execute(SAVE,List.of(key(user,"lock"),key(user,"context-v2")),owner,
                     Long.toString(properties.ttl().toMillis()),json(stored));
             if(!Long.valueOf(1).equals(filled))throw new IllegalStateException("History owner lost");
         } else stored=parse(cached);
@@ -75,8 +75,8 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
         for (var turn:stored.turns()) merged.put(turn.messageId(),turn);
         if (entry != null && entry.touched.plus(properties.ttl()).isAfter(Instant.now()))
             for (var turn:entry.turns) merged.put(turn.messageId(),turn);
-        var selected=merged.values().stream().filter(turn -> !turn.messageId().equals(messageId)
-                && before(turn.receivedAt(),turn.sequence(),received,sequence))
+        var selected=merged.values().stream().filter(turn -> turn.members().stream().allMatch(member -> !member.messageId().equals(messageId)
+                && before(member.receivedAt(),member.sequence(),received,sequence)))
                 .sorted(Comparator.comparing(PrivateHistory.Turn::receivedAt).thenComparingLong(PrivateHistory.Turn::sequence)).toList();
         selected=selected.subList(Math.max(0,selected.size()-properties.rounds()),selected.size());
         // 缓存正常轮次并不包含失败提示、待命或非文本入站，不能据此伪造上次聊天时间。
@@ -100,10 +100,25 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
      */
     @Override public void save(String user,String owner,PrivateHistory snapshot) {
         var turns=snapshot.turns().subList(Math.max(0,snapshot.turns().size()-properties.rounds()),snapshot.turns().size());
-        Long updated=redis.execute(SAVE,List.of(key(user,"lock"),key(user,"context")),owner,
+        if(!Objects.equals(redis.opsForValue().get(key(user,"lock")),owner))throw new IllegalStateException("Conversation lock lost");
+        // 已获 LINE 接受的本地快照先保留；缓存写失败或数据库暂未提交不能令下一轮忘记已发送内容。
+        synchronized (local) { entry(user).turns=List.copyOf(turns); }
+        Long updated=redis.execute(SAVE,List.of(key(user,"lock"),key(user,"context-v2")),owner,
                 Long.toString(properties.ttl().toMillis()),json(new PrivateHistory(List.copyOf(turns),snapshot.lastInboundAt())));
         if (!Long.valueOf(1).equals(updated)) throw new IllegalStateException("Conversation lock lost");
-        synchronized (local) { entry(user).turns=List.copyOf(turns); }
+    }
+    /**
+     * 不执行 I/O，保留刚获接受的完整轮；总截止到达或 Redis 提交失败仍可供下一轮合并。
+     * @param user 完整用户标识
+     * @param turn 仅正常已接受轮次
+     */
+    @Override public void rememberAccepted(String user,PrivateHistory.Turn turn) {
+        synchronized(local) {
+            var entry=entry(user);var turns=new ArrayList<>(entry.turns);
+            turns.removeIf(previous -> previous.messageId().equals(turn.messageId()));turns.add(turn);
+            turns.sort(Comparator.comparing(PrivateHistory.Turn::receivedAt).thenComparingLong(PrivateHistory.Turn::sequence));
+            entry.turns=List.copyOf(turns.subList(Math.max(0,turns.size()-properties.rounds()),turns.size()));
+        }
     }
     /**
      * 保存有界入站时间观察，当前与未来消息在读取时排除。
@@ -127,7 +142,7 @@ public class RedisConversationMemory implements ConversationMemory, UserDataPurg
      * @throws IllegalStateException 仍有锁持有者时抛出，删除可重试
      */
     @Override public void purge(String userId) {
-        Long deleted=redis.execute(PURGE,List.of(key(userId,"lock"),key(userId,"context"),key(userId,"rate")));
+        Long deleted=redis.execute(PURGE,List.of(key(userId,"lock"),key(userId,"context"),key(userId,"context-v2"),key(userId,"rate")));
         if (!Long.valueOf(1).equals(deleted)) throw new IllegalStateException("User still has an active Redis owner");
         synchronized (local) { local.remove(userId); }
     }

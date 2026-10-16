@@ -77,4 +77,15 @@ class TurnBufferTest {
         assertThatThrownBy(() -> buffer.snapshot(UUID.randomUUID(), 1, 1, 0, List.of(first)))
                 .isInstanceOf(IllegalStateException.class);
     }
+    @Test void frozenBusinessMetadataKeepsOriginalValuesAndCannotRetainCredentialsOrBeMutatedByCaller() {
+        var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        var content=mapper.createObjectNode().put("type","text").put("id","message").put("text","完整原文")
+                .put("quoteToken","fictional-quote-token").put("markAsReadToken","fictional-read-token");
+        content.set("metadata",mapper.createObjectNode().put("name","完整元資料").put("api_key","fictional-api-key"));
+        var member=new InboundMember("fictional-user","event","message","完整原文",Instant.EPOCH,Instant.EPOCH,1,"trace",content);
+        content.put("text","呼叫方修改");((com.fasterxml.jackson.databind.node.ObjectNode)member.content()).put("text","副本修改");
+        assertThat(member.content().path("text").asText()).isEqualTo("完整原文");
+        assertThat(member.content().path("metadata").path("name").asText()).isEqualTo("完整元資料");
+        assertThat(member.toString()).doesNotContain("fictional-quote-token","fictional-read-token","fictional-api-key");
+    }
 }

@@ -90,7 +90,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
         if(failureEvent!=null)assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event=?",Integer.class,user,failureEvent)).isEqualTo(1);
         assertThat(meters.find("ai.fallback.attempted").counter()==null?0:meters.get("ai.fallback.attempted").counter().count()).isEqualTo(attempts);
         if(kind.equals("FALLBACK"))verify(testModel).generate(any());else verifyNoInteractions(testModel);
-        String cached=redis.opsForValue().get(key(user,"context"));
+        String cached=redis.opsForValue().get(key(user,"context-v2"));
         if(cached!=null)assertThat(mapper.readTree(cached).path("turns")).isEmpty();
     }
 
@@ -135,7 +135,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(content.path("incomplete_reason").asText()).isEqualTo("max_output_tokens");
         assertThat(content.path("reasoning_tokens").asInt()).isEqualTo(1024);
         assertThat(jdbc.queryForObject("SELECT reply_kind FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",String.class,user)).isEqualTo("FALLBACK");
-        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain("虛構測試問題");
+        assertThat(redis.opsForValue().get(key(user,"context-v2"))).doesNotContain("虛構測試問題");
         assertThat(logs).contains("max_output_tokens","reasoning_tokens").doesNotContain("fake-openai-api-key","fake-ai-reply-token","fake-ai-quote-token");
         verify(line).replyMessage(any());verify(testModel).generate(any());
     }
@@ -177,7 +177,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
         var row=jdbc.queryForMap("SELECT reply_kind,model_name,input_tokens,output_tokens FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",user);
         assertThat(row.get("reply_kind")).isEqualTo("FALLBACK");assertThat(row.get("model_name")).isNull();
         assertThat(row.get("input_tokens")).isNull();assertThat(row.get("output_tokens")).isNull();
-        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain("未完成原文","虛".repeat(5001));
+        assertThat(redis.opsForValue().get(key(user,"context-v2"))).doesNotContain("未完成原文","虛".repeat(5001));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event='ai.generate.failed'",Integer.class,user)).isEqualTo(1);
         if(scenario.equals("too_long"))assertThat(jdbc.queryForObject("SELECT detail::text FROM event_log WHERE user_id=? AND event='ai.generate.failed'",String.class,user))
                 .contains("虛".repeat(5001));
@@ -196,7 +196,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
         send(user,"unknown-send","虛構問題", "user","active");drain();
         verify(line).replyMessage(any());verify(line,never()).pushMessage(any(),any());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isZero();
-        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain("不能當作已送出");
+        assertThat(redis.opsForValue().get(key(user,"context-v2"))).doesNotContain("不能當作已送出");
     }
     @Test void cacheFailureAfterReplyDoesNotReleaseDedupOrSendAgain() throws Exception {
         String user=user();doThrow(new IllegalStateException("fake-private-redis-password")).when(memory).save(eq(user),any(),any());
@@ -231,7 +231,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
         send(user,"late-model","虛構問題","user","active");drain();
         verify(line).replyMessage(argThat(request -> request.messages().toString().contains(aiProperties.fallback())));
         assertThat(jdbc.queryForObject("SELECT reply_kind FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",String.class,user)).isEqualTo("FALLBACK");
-        assertThat(redis.opsForValue().get(key(user,"context"))).doesNotContain("過期結果不能送出");
+        assertThat(redis.opsForValue().get(key(user,"context-v2"))).doesNotContain("過期結果不能送出");
     }
     @Test void deletionCancelsPendingGenerationWaitsInFlightAndOldResultCannotWriteBack() throws Exception {
         String user=user();var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
@@ -246,12 +246,12 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
             release.countDown();deleted.get(5,TimeUnit.SECONDS);drain();
             verify(testModel).generate(any());verifyNoInteractions(line);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=?",Integer.class,user)).isZero();
-            assertThat(redis.hasKey(key(user,"context"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
+            assertThat(redis.hasKey(key(user,"context-v2"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
             assertThat(jdbc.queryForObject("SELECT outcome FROM audit_log WHERE target_user_id=? AND event='user.data.deleted'",String.class,user)).isEqualTo("SUCCESS");
             doReturn(result("新的歷史")).when(testModel).generate(any());
             send(user,"new-after-delete","新訊息", "user","active");drain();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=?",Integer.class,user)).isEqualTo(2);
-            assertThat(redis.opsForValue().get(key(user,"context"))).contains("新的歷史").doesNotContain("刪除前舊生成");
+            assertThat(redis.opsForValue().get(key(user,"context-v2"))).contains("新的歷史").doesNotContain("刪除前舊生成");
         }finally{release.countDown();maintenance.shutdownNow();}
     }
     private ResponseEntity<String> send(String user,String id,String text,String source,String mode) throws Exception {

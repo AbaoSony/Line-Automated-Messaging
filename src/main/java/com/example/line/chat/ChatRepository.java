@@ -28,7 +28,7 @@ class ChatRepository {
                 VALUES (?, ?, ?, ?, CAST(? AS jsonb), ?)
                 ON CONFLICT (line_message_id) WHERE direction = 'INBOUND' AND line_message_id IS NOT NULL
                 DO NOTHING
-                """, userId, direction, lineMessageId, messageType, content, Timestamp.from(createdAt));
+                """, userId, direction, lineMessageId, messageType, content, timestamp(createdAt));
     }
 
     void insert(String userId, String direction, String messageId, String type, String content, Instant time, ChatMetadata meta) {
@@ -38,36 +38,55 @@ class ChatRepository {
                 model_name,input_tokens,output_tokens,latency_ms)
                 VALUES (?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT (line_message_id) WHERE direction = 'INBOUND' AND line_message_id IS NOT NULL DO NOTHING
-                """, userId, direction, messageId, type, content, Timestamp.from(time), meta.sourceType(), meta.conversationId(),
-                meta.replyKind(), meta.inReplyToMessageId(), meta.correlationId(), Timestamp.from(meta.receivedAt()),
+                """, userId, direction, messageId, type, content, timestamp(time), meta.sourceType(), meta.conversationId(),
+                meta.replyKind(), meta.inReplyToMessageId(), meta.correlationId(), timestamp(meta.receivedAt()),
                 meta.receivedSequence(), meta.model(), meta.inputTokens(), meta.outputTokens(), meta.latencyMs());
     }
 
     PrivateHistory privateHistory(String user, String currentId, Instant receivedAt, long sequence, int limit) {
-        var rows = jdbc.queryForList("""
-                SELECT * FROM chat_message WHERE user_id=? AND source_type='USER' AND conversation_id=?
-                AND (received_at < ? OR (received_at = ? AND received_sequence < ?))
-                AND (line_message_id IS NULL OR line_message_id <> ?)
-                ORDER BY received_at DESC,received_sequence DESC,id DESC LIMIT ?
-                """, user, user, Timestamp.from(receivedAt), Timestamp.from(receivedAt), sequence, currentId, limit);
-        var inbound = new java.util.LinkedHashMap<String, java.util.Map<String,Object>>();
-        Instant last = null;
-        for (var row : rows) if ("INBOUND".equals(row.get("direction"))) {
-            if (last == null) last = ((Timestamp) row.get("created_at")).toInstant();
-            if ("TEXT".equals(row.get("message_type"))) inbound.put((String) row.get("line_message_id"), row);
+        var rows=jdbc.queryForList("""
+                WITH candidates AS (
+                  SELECT t.*,o.content AS output_content FROM ai_turn t JOIN chat_message o ON o.id=t.outbound_message_id
+                  WHERE t.user_id=? AND t.conversation_id=? AND o.source_type='USER' AND o.reply_kind='AI'
+                    AND jsonb_typeof(o.content->'text')='string' AND btrim(o.content->>'text')<>''
+                    AND (SELECT count(*) FROM ai_turn_member m WHERE m.turn_id=t.turn_id)=t.member_count
+                    AND (SELECT max(member_order) FROM ai_turn_member m WHERE m.turn_id=t.turn_id)=t.member_count
+                    AND EXISTS (SELECT 1 FROM ai_turn_member m JOIN chat_message i ON i.id=m.inbound_message_id
+                      WHERE m.turn_id=t.turn_id AND m.member_order=1 AND i.received_at=t.first_received_at
+                        AND i.received_sequence=t.first_received_sequence)
+                    AND NOT EXISTS (SELECT 1 FROM ai_turn_member m JOIN chat_message i ON i.id=m.inbound_message_id
+                      WHERE m.turn_id=t.turn_id AND (i.line_message_id=? OR i.source_type<>'USER' OR i.reply_kind<>'LEGACY'
+                        OR i.correlation_id IS DISTINCT FROM m.webhook_event_id OR i.received_at IS NULL OR i.received_sequence IS NULL
+                        OR i.received_sequence<1 OR i.line_message_id IS NULL OR btrim(i.line_message_id)=''
+                        OR jsonb_typeof(i.content->'text') IS DISTINCT FROM 'string' OR btrim(i.content->>'text')=''
+                        OR (i.received_at,i.received_sequence)>=(?::timestamptz,?)))
+                    AND NOT EXISTS (SELECT 1 FROM ai_turn_member m JOIN chat_message i ON i.id=m.inbound_message_id
+                      JOIN ai_turn_member n ON n.turn_id=m.turn_id AND n.member_order=m.member_order+1
+                      JOIN chat_message j ON j.id=n.inbound_message_id
+                      WHERE m.turn_id=t.turn_id AND (i.received_at,i.received_sequence)>=(j.received_at,j.received_sequence))
+                  ORDER BY t.first_received_at DESC,t.first_received_sequence DESC,t.turn_id DESC LIMIT ?
+                ), bounded AS (
+                  SELECT *,sum(member_count+1) OVER (ORDER BY first_received_at DESC,first_received_sequence DESC,turn_id DESC) AS scanned
+                  FROM candidates
+                )
+                SELECT t.turn_id,t.output_content,m.member_order,m.trace_id,i.line_message_id,i.correlation_id,
+                  i.content,i.created_at,i.received_at,i.received_sequence
+                FROM bounded t JOIN ai_turn_member m ON m.turn_id=t.turn_id JOIN chat_message i ON i.id=m.inbound_message_id
+                WHERE t.scanned<=? ORDER BY t.first_received_at,t.first_received_sequence,t.turn_id,m.member_order
+                """,user,user,currentId,Timestamp.from(receivedAt),sequence,limit,limit);
+        var grouped=new java.util.LinkedHashMap<java.util.UUID,java.util.ArrayList<PrivateHistory.Member>>();
+        var outputs=new java.util.HashMap<java.util.UUID,String>();
+        for(var row:rows) {
+            var id=(java.util.UUID)row.get("turn_id");
+            grouped.computeIfAbsent(id,ignored -> new java.util.ArrayList<>()).add(new PrivateHistory.Member(
+                    (String)row.get("line_message_id"),(String)row.get("correlation_id"),text(row.get("content")),
+                    ((Timestamp)row.get("created_at")).toInstant(),((Timestamp)row.get("received_at")).toInstant(),
+                    ((Number)row.get("received_sequence")).longValue(),(String)row.get("trace_id")));
+            outputs.put(id,text(row.get("output_content")));
         }
-        var paired = new java.util.LinkedHashMap<String, PrivateHistory.Turn>();
-        for (var row : rows) if ("OUTBOUND".equals(row.get("direction")) && "AI".equals(row.get("reply_kind"))) {
-            var input = inbound.get(row.get("in_reply_to_message_id"));
-            if (input == null || !java.util.Objects.equals(input.get("correlation_id"), row.get("correlation_id"))) continue;
-            String id = (String) input.get("line_message_id");
-            paired.putIfAbsent(id, new PrivateHistory.Turn(id, (String) input.get("correlation_id"),
-                    text(input.get("content")), text(row.get("content")), ((Timestamp) input.get("created_at")).toInstant(),
-                    ((Timestamp) input.get("received_at")).toInstant(), ((Number) input.get("received_sequence")).longValue()));
-        }
-        var turns = new java.util.ArrayList<>(paired.values());
-        turns.sort(java.util.Comparator.comparing(PrivateHistory.Turn::receivedAt).thenComparingLong(PrivateHistory.Turn::sequence));
-        return new PrivateHistory(List.copyOf(turns), last);
+        var turns=grouped.entrySet().stream().map(entry -> new PrivateHistory.Turn(entry.getKey(),entry.getValue(),outputs.get(entry.getKey()))).toList();
+        var last=lastPrivateInbound(user,currentId,receivedAt,sequence);
+        return new PrivateHistory(turns,last==null?null:last.occurredAt());
     }
 
     private String text(Object content) {
@@ -94,12 +113,25 @@ class ChatRepository {
                 """, this::map, userId, limit);
     }
 
+    @org.springframework.transaction.annotation.Transactional
     int deleteExpiredBatch(Instant cutoff, int batchSize) {
-        return jdbc.update("""
+        int deleted=jdbc.update("""
                 DELETE FROM chat_message WHERE id IN (
                     SELECT id FROM chat_message WHERE created_at < ? ORDER BY created_at, id LIMIT ?
                 )
                 """, Timestamp.from(cutoff), batchSize);
+        // 入站过期会级联删除成员，清理同一批中的残缺轮次，剩余原始消息继续按各自保留期处理。
+        jdbc.update("""
+                DELETE FROM ai_turn WHERE turn_id IN (
+                  SELECT t.turn_id FROM ai_turn t WHERE
+                    (SELECT count(*) FROM ai_turn_member m WHERE m.turn_id=t.turn_id)<>t.member_count
+                  ORDER BY t.accepted_at,t.turn_id LIMIT ?)
+                """,batchSize);
+        return deleted;
+    }
+
+    private static Timestamp timestamp(Instant time) {
+        return time==null?null:Timestamp.from(time.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
     }
 
     void delete(String userId) { jdbc.update("DELETE FROM chat_message WHERE user_id = ?", userId); }

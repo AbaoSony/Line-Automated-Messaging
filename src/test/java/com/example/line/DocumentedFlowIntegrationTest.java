@@ -55,6 +55,7 @@ import static org.awaitility.Awaitility.await;
 class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
     private static final Path EXAMPLES = Path.of("docs", "examples");
     private final ObjectMapper mapper = new ObjectMapper();
+    @Autowired private com.example.line.ai.generation.ContextComposer composer;
     @Autowired private TestRestTemplate http;
     @Autowired private LocalLineStub stub;
     @Autowired private ThreadPoolTaskExecutor webhookExecutor;
@@ -246,7 +247,6 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         assertThat(send(silent,true).getStatusCode()).isEqualTo(HttpStatus.OK);awaitWorkers();assertThat(stub.replies).isEmpty();
         documentedThreeMemberAggregationMatchesItsReplyExample(logs);
     }
-
     private void documentedThreeMemberAggregationMatchesItsReplyExample(CapturedOutput logs) throws Exception {
         var entered=new java.util.concurrent.CountDownLatch(1);
         var release=new java.util.concurrent.CountDownLatch(1);
@@ -274,6 +274,9 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(current.get().currentMessages()).containsExactly(events.get(0).path("message").path("text").asText(),
                     events.get(1).path("message").path("text").asText(),events.get(2).path("message").path("text").asText());
             assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isEqualTo(1);
+            var storedHistory=chatHistory.findPrivate(user,"fictional-next-message",java.time.Instant.now().plusSeconds(1),Long.MAX_VALUE,200);
+            assertThat(storedHistory.turns()).singleElement().satisfies(turn -> assertThat(turn.members()).hasSize(3));
+            assertThat(mapper.<JsonNode>valueToTree(composer.composeMembers("",List.of("fictional-next"),storedHistory.turns()))).isEqualTo(readJson("reply/aggregate-history-messages.json"));
             for(var event:events)assertThat(jdbc.queryForObject("SELECT content->>'text' FROM chat_message WHERE line_message_id=?",String.class,
                     event.path("message").path("id").asText())).isEqualTo(event.path("message").path("text").asText());
             assertThat(send(body,true).getStatusCode()).isEqualTo(HttpStatus.OK);awaitWorkers();assertThat(stub.replies).isEmpty();
@@ -281,7 +284,6 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(logs).doesNotContain("REPLY_TOKEN_PLACEHOLDER_P2_1","REPLY_TOKEN_PLACEHOLDER_P2_2","REPLY_TOKEN_PLACEHOLDER_P2_3");
         } finally {release.countDown();}
     }
-
     private ResponseEntity<String> send(byte[] body, boolean correctSignature) throws Exception {
         var mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec("documentation-test-secret".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
@@ -292,7 +294,6 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                 : Base64.getEncoder().encodeToString(new byte[32]));
         return http.postForEntity("/line/webhook", new HttpEntity<>(body, headers), String.class);
     }
-
     private JsonNode readJson(String name) throws IOException {
         return mapper.readTree(Files.readAllBytes(EXAMPLES.resolve(name)));
     }

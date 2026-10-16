@@ -8,7 +8,7 @@ import java.time.temporal.ChronoUnit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** 根据独立开关分批清理过期聊天，每次调度仅删除一批，防止长事务和占满落库队列。 */
+/** 根据独立开关清理聊天，每次事务各处理一批过期消息和残缺轮次，防止长事务和占满落库队列。 */
 @Component
 class ChatRetentionTask {
     private final ChatRepository repository;

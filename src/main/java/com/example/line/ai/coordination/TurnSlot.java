@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 /** 由唯一协调器锁保护的轮次与会话槽位数据，不维护用户映射或自行执行外部 I/O。 */
 final class TurnSlot {
     final UUID id = UUID.randomUUID();
+    final UUID sendAttemptId = UUID.randomUUID();
     final String user;
     final long epoch;
     final List<TurnBuffer.Membership> members = new ArrayList<>();
@@ -100,7 +101,7 @@ final class TurnSlot {
         alarmVersion++; return true;
     }
     ReplyPermit takePermit() {
-        var permit = new ReplyPermit(replyToken, budget.totalDeadline()); replyToken = null; return permit;
+        var permit = new ReplyPermit(replyToken, budget.totalDeadline(),sendAttemptId); replyToken = null; return permit;
     }
     void cancelTimers() {
         if (collectionTimer != null) collectionTimer.cancel();

@@ -103,7 +103,7 @@ IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成
 3. 等待执行/持久化/日志队列排空，再重投递相同事件，断言不生成、不再次 Reply；输出和日志不能包含三个凭证占位符。
 4. 普通运行的连发会受实际时机、固定截止、容量和一次撤销额度影响，可能形成待处理轮次；不能把这个可控轨迹当作所有连发都只调用一次模型的保证。
 
-多成员过渡出站 content.ai_turn 保存完整成员，in_reply_to_message_id=null；第五阶段关联表完成前，该轮不进入后续上下文。单成员原有示例与断言继续有效。MODEL 时机判断尚未实现，当前用 AI_DECISION_MODE=RULE；技术兜底仍默认静默。
+多成员出站 content.ai_turn 仍保存完整成员，in_reply_to_message_id=null；第五阶段已建立 ai_turn/ai_turn_member，完整成功轮次已进入后续上下文。单成员原有示例与断言继续有效。MODEL 时机判断尚未实现，当前用 AI_DECISION_MODE=RULE；技术兜底仍默认静默。
 
 
 ## P2 第四阶段未知发送示例（全部虚构，已实现）
@@ -113,3 +113,12 @@ IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成
 ReplyOutcomeIntegrationTest 对原始字节签名并提交本地服务，屏障保证两条在首次正文前准入；生产传输/官方 SDK 指向回环 HTTP Stub。Stub 返回 503 和 Retry-After:0，断言只有一次实际 POST，失败事件 delivery_outcome=UNKNOWN、顶层 outcome=FAILED；完整入站保留，无正常成功出站。将相同事件 deliveryContext.isRedelivery 改为 true 后再提交，断言不再生成或 Reply，不改用 Push。
 
 同测试另外注入明确 4xx、307、断连、超时后迟到 200 和非法 2xx 正文，并验证发送中新增成员及删除竞态。已发起请求的本地取消不表示远端撤回；只有 SDK 前终止才记 NOT_SENT。原 DocumentedFlowIntegrationTest 正常 Reply/Push 示例继续有效，并使用同一受控消息传输策略。
+
+
+## P2 第五阶段完整成功历史（全部虚构，已实现）
+
+`../reply/aggregate-history-messages.json` 对应上述三成员聚合后的完整模型历史，依序为三条 user 原文及一条 assistant「完整虛構聚合回覆」，所有标识、文本与场景均虚构。它是模型历史业务片段，不是 LINE HTTP 请求。
+
+DocumentedFlowIntegrationTest 在原三成员签名入站和一次真实 SDK/本地 Stub Reply 后，等待业务持久化排空，从 PostgreSQL 成功关联回源、确认三位成员完整存在，再逐字段比较 ContextComposer 展开的全部历史角色和原文与该文件一致。重新投递仍不能生成第二次出站。AggregatedFlowIntegrationTest 另外发送下一条问题，断言实际下一次模型调用包含这四条历史。
+
+运行时先停旧进程并备份，再用正常 IDEA/Maven 启动，Flyway 自动执行 V4；不手动改写 V1/V2/V3。旧 P1/过渡记录只有通过唯一、完整来源核对才进入新历史；无法核对的原始消息仍保留。Redis 使用 context-v2，旧 context 等待原 TTL；手动删除覆盖两代缓存和新表。测试只使用临时 PostgreSQL/Redis 与本地替身，没有迁移真实数据库或调用真实模型。

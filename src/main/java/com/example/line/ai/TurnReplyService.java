@@ -26,6 +26,7 @@ public class TurnReplyService implements UserDataPurger {
     private final DecisionProperties decision;
     private final LineMessageService messages;
     private final ChatMessageService chat;
+    private final ChatTurnService acceptedTurns;
     private final ConversationMemory memory;
     private final UserWorkTracker tracker;
     private final ObjectMapper mapper;
@@ -39,16 +40,18 @@ public class TurnReplyService implements UserDataPurger {
      * @param decision 共享技术提示冷却
      * @param messages 一次 Reply 封装
      * @param chat 原文异步存储
-     * @param memory 正常单成员历史缓存
+     * @param memory 正常完整轮次历史缓存
+     * @param acceptedTurns 成功轮次异步事务
      * @param tracker 删除屏障
      * @param mapper 业务 JSON
      * @param meters 无用户标签指标
      */
     public TurnReplyService(AiProperties ai, DecisionProperties decision, LineMessageService messages,
                             ChatMessageService chat, ConversationMemory memory, UserWorkTracker tracker,
-                            ObjectMapper mapper, MeterRegistry meters) {
+                            ObjectMapper mapper, MeterRegistry meters,ChatTurnService acceptedTurns) {
         this.ai=ai; this.decision=decision; this.messages=messages; this.chat=chat;
         this.memory=memory; this.tracker=tracker; this.mapper=mapper; this.meters=meters;
+        this.acceptedTurns=acceptedTurns;
     }
     /**
      * 取得唯一发送权后只尝试一次，已接受回复的缓存失败不改变发送结果。
@@ -87,18 +90,23 @@ public class TurnReplyService implements UserDataPurger {
             }
             turns.finishSending(ticket,TurnState.ACCEPTED);
             var first=members.get(0);
-            // 多成员关联表尚未迁移前，不能把回复错误配给其中一条并污染历史。
-            var content=mapper.createObjectNode().put("text",text);
-            if (members.size()>1) content.set("ai_turn",mapper.valueToTree(BusinessLog.fields("turn_id",ticket.turnId(),"members",members)));
-            chat.recordMessage(first.userId(),"OUTBOUND",null,"TEXT",content,Instant.now(),metadata(first,kind,kind.equals("AI")?result:null,members.size()==1));
+            AcceptedTurn accepted=null;
+            if(kind.equals("AI")) {
+                accepted=new AcceptedTurn(ticket.turnId(),permit.sendAttemptId(),first.userId(),members.stream()
+                        .map(member -> new AcceptedTurn.Input(member.messageId(),member.eventId(),member.text(),member.content(),
+                                member.occurredAt(),member.receivedAt(),member.sequence(),member.traceId())).toList(),text,
+                        metadata(first,kind,result,members.size()==1),Instant.now());
+                acceptedTurns.recordAccepted(accepted);
+                if(!tracker.blocked(first.userId()))memory.rememberAccepted(first.userId(),accepted.history());
+            } else chat.recordMessage(first.userId(),"OUTBOUND",null,"TEXT",mapper.createObjectNode().put("text",text),
+                    Instant.now(),metadata(first,kind,null,members.size()==1));
             meters.counter("ai.reply.accepted","kind",kind).increment();
             if (kind.equals("FALLBACK")) meters.counter("ai.fallback.accepted").increment();
-            if (kind.equals("AI") && members.size()==1 && history!=null && owner!=null
+            if (accepted!=null && history!=null && owner!=null
                     && !tracker.blocked(first.userId()) && permit.deadline().permits(Duration.ZERO)) {
                 var rounds=new ArrayList<>(history.turns());
                 rounds.removeIf(turn -> turn.messageId().equals(first.messageId()));
-                rounds.add(new PrivateHistory.Turn(first.messageId(),first.eventId(),first.text(),text,
-                        first.occurredAt(),first.receivedAt(),first.sequence()));
+                rounds.add(accepted.history());
                 try { memory.save(first.userId(),owner,new PrivateHistory(List.copyOf(rounds),first.occurredAt())); }
                 catch (RuntimeException failure) { dependencyFailure("cache_write_after_reply",failure); }
             }

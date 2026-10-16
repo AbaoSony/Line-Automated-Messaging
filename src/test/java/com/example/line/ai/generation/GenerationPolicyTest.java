@@ -46,4 +46,14 @@ class GenerationPolicyTest {
         var old=new PrivateHistory.Turn("old","old","舊".repeat(100),"舊回覆",Instant.EPOCH,Instant.EPOCH,1);
         assertThat(new ContextComposer(settings(300)).composeMembers("system",current,List.of(old))).isEmpty();
     }
+    @Test void aggregatedHistoryKeepsEveryUserRoleAndNeverTrimsPartOfAnOldRound() {
+        var members=List.of(new PrivateHistory.Member("first","event1","完整第一條",Instant.EPOCH,Instant.EPOCH,1,"trace1"),
+                new PrivateHistory.Member("second","event2","完整第二條",Instant.EPOCH,Instant.EPOCH,2,"trace2"));
+        var turn=new PrivateHistory.Turn(java.util.UUID.randomUUID(),members,"唯一完整回覆");
+        assertThat(new ContextComposer(settings(1000)).composeMembers("system",List.of("current"),List.of(turn)))
+                .containsExactly(new ChatRequest.HistoryMessage("user","完整第一條"),new ChatRequest.HistoryMessage("user","完整第二條"),
+                        new ChatRequest.HistoryMessage("assistant","唯一完整回覆"));
+        assertThat(new ContextComposer(settings(350)).composeMembers("system",List.of("current"),List.of(turn))).isEmpty();
+        assertThat(turn.members()).hasSize(2);
+    }
 }

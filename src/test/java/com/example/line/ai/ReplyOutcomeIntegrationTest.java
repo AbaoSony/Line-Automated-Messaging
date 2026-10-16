@@ -70,6 +70,8 @@ class ReplyOutcomeIntegrationTest extends PostgresIntegrationSupport {
         assertThat(sent.body().path("replyToken").asText()).isEqualTo("fictional-reply-"+prefix+"-second");
         assertThat(sent.body().path("messages").get(0).path("text").asText()).isEqualTo("完整虛構正文");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isEqualTo(status==200?1:0);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_turn WHERE user_id=?",Integer.class,user)).isEqualTo(status==200?1:0);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_turn_member WHERE user_id=?",Integer.class,user)).isEqualTo(status==200?2:0);
         if(status!=200)assertThat(jdbc.queryForObject("SELECT detail->>'delivery_outcome' FROM event_log WHERE user_id=? AND event='line.reply.failed'",String.class,user))
                 .isEqualTo(expected.equals("FAILED")?"REJECTED":"UNKNOWN");
         send(user,prefix+"-first","完整第一則",true);send(user,prefix+"-second","完整第二則？",true);drain();
@@ -86,6 +88,7 @@ class ReplyOutcomeIntegrationTest extends PostgresIntegrationSupport {
         send(user,prefix+"-first","完整第一則",true);send(user,prefix+"-second","完整第二則？",true);drain();
         assertThat(stub.requests).hasSize(1);assertThat(stub.pushes.get()).isZero();verify(testModel).generate(any());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_turn WHERE user_id=?",Integer.class,user)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM event_log WHERE user_id=? AND event='ai.fallback.used'",Integer.class,user)).isZero();
     }
     @Test void messageArrivingDuringSendingGetsItsOwnTurnAndCannotReplaceSendingCredential() throws Exception {
@@ -99,6 +102,8 @@ class ReplyOutcomeIntegrationTest extends PostgresIntegrationSupport {
         assertThat(sent.get(1).body().path("replyToken").asText()).isEqualTo("fictional-reply-sending-next");
         assertThat(generated.get(0).currentMessages()).containsExactly("完整第一則","完整第二則？");
         assertThat(generated.get(1).currentMessages()).containsExactly("下一輪完整問題？");
+        assertThat(generated.get(1).history()).containsExactly(new ChatRequest.HistoryMessage("user","完整第一則"),
+                new ChatRequest.HistoryMessage("user","完整第二則？"),new ChatRequest.HistoryMessage("assistant","完整虛構正文"));
     }
     @Test void acceptedReplyAndCacheFailureStillKeepAllMembersConsumed() throws Exception {
         String user=user();doThrow(new IllegalStateException("fictional-private-cache-password")).when(memory).save(eq(user),any(),any());
@@ -106,6 +111,12 @@ class ReplyOutcomeIntegrationTest extends PostgresIntegrationSupport {
         send(user,"cache-after-accept","完整單條問題？",true);drain();
         assertThat(stub.requests).hasSize(1);verify(testModel).generate(any());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='OUTBOUND'",Integer.class,user)).isEqualTo(1);
+        var next=new AtomicReference<ChatRequest>();
+        doAnswer(call -> {next.set(call.getArgument(0));return result();}).when(testModel).generate(any());
+        send(user,"cache-failed-followup","緊接著下一條完整問題？",false);drain();
+        assertThat(next.get().history()).containsExactly(new ChatRequest.HistoryMessage("user","完整單條問題？"),
+                new ChatRequest.HistoryMessage("assistant","完整虛構正文"));
+        assertThat(stub.requests).hasSize(2);
     }
     @Test void deletionDuringSendingCancelsLocallyWithoutPretendingRemoteRequestWasNeverSent() throws Exception {
         String user=user();var plan=stub.plan(200,ReplyHttpStub.Mode.HOLD);held.add(plan);

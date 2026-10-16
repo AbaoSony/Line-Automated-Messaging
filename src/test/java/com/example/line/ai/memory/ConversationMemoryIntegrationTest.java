@@ -42,7 +42,7 @@ class ConversationMemoryIntegrationTest extends PostgresIntegrationSupport {
         assertThat(loaded.turns()).hasSize(10).extracting(PrivateHistory.Turn::messageId)
                 .containsExactly("m3","m4","m5","m6","m7","m8","m9","m10","m11","m12");
         assertThat(loaded.lastInboundAt()).isEqualTo(base.plusSeconds(12));
-        assertThat(redis.getExpire(key(user,"context"))).isBetween(1L,properties.ttl().toSeconds());
+        assertThat(redis.getExpire(key(user,"context-v2"))).isBetween(1L,properties.ttl().toSeconds());
         coordination.release(user,owner);
     }
     @Test void acceptedInMemoryTurnSurvivesAsyncDatabaseLagAndCurrentInputIsExcluded(){
@@ -69,8 +69,9 @@ class ConversationMemoryIntegrationTest extends PostgresIntegrationSupport {
         String user=user();for(int index=0;index<properties.rateLimit();index++)assertThat(coordination.allow(user)).isTrue();
         assertThat(coordination.allow(user)).isFalse();assertThat(redis.getExpire(key(user,"rate"))).isBetween(1L,properties.rateWindow().toSeconds());
         String owner=coordination.acquire(user,deadline());memory.save(user,owner,new PrivateHistory(List.of(),null));coordination.release(user,owner);
+        redis.opsForValue().set(key(user,"context"),"old-format-is-not-v2",Duration.ofHours(1));
         ((com.example.line.user.UserDataPurger)memory).purge(user);
-        assertThat(redis.hasKey(key(user,"context"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
+        assertThat(redis.hasKey(key(user,"context"))).isFalse();assertThat(redis.hasKey(key(user,"context-v2"))).isFalse();assertThat(redis.hasKey(key(user,"rate"))).isFalse();
     }
     @Test void unknownSourceLegacyAndIncompletePairsNeverBecomeAiHistory(){
         String user=user();Instant base=Instant.now();
@@ -92,11 +93,38 @@ class ConversationMemoryIntegrationTest extends PostgresIntegrationSupport {
         assertThat(memory.load(user,"memory-current-gap",base.plusSeconds(3),3,owner,deadline()).lastInboundAt()).isEqualTo(base.plusSeconds(2));
         coordination.release(user,owner);
     }
+    @Test void oldCacheIsNeverParsedAsNewHistoryAndAllCurrentAndPendingMembersAreExcluded(){
+        String user=user();Instant base=Instant.now().minusSeconds(10);
+        redis.opsForValue().set(key(user,"context"),"this is deliberately invalid old JSON",Duration.ofMinutes(1));
+        String owner=coordination.acquire(user,deadline());
+        assertThat(memory.load(user,"first",base,1,owner,deadline()).turns()).isEmpty();
+        assertThat(redis.hasKey(key(user,"context"))).isTrue();assertThat(redis.hasKey(key(user,"context-v2"))).isTrue();
+        var members=List.of(new PrivateHistory.Member("first","event1","完整首條",base,base,1,"trace1"),
+                new PrivateHistory.Member("pending","event2","完整待處理",base.plusSeconds(2),base.plusSeconds(2),3,"trace2"));
+        memory.save(user,owner,new PrivateHistory(List.of(new PrivateHistory.Turn(UUID.randomUUID(),members,"完整已接受回覆")),base));
+        assertThat(memory.load(user,"current",base.plusSeconds(1),2,owner,deadline()).turns()).isEmpty();
+        assertThat(memory.load(user,"pending",base.plusSeconds(3),4,owner,deadline()).turns()).isEmpty();
+        coordination.release(user,owner);
+    }
     private void seed(String user,String direction,String id,String type,String kind,String source,String replyTo,String correlation,Instant received,long sequence){
         jdbc.update("""
                 INSERT INTO chat_message(user_id,direction,line_message_id,message_type,content,created_at,source_type,conversation_id,
                  reply_kind,in_reply_to_message_id,correlation_id,received_at,received_sequence)
                 VALUES(?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?)
                 """,user,direction,id,type,"{\"text\":\"完整虛構內容\"}",java.sql.Timestamp.from(received),source,user,kind,replyTo,correlation,java.sql.Timestamp.from(received),sequence);
+        if(direction.equals("OUTBOUND") && kind.equals("AI") && source.equals("USER")) {
+            UUID turnId=UUID.randomUUID();
+            int inserted=jdbc.update("""
+                    INSERT INTO ai_turn(turn_id,send_attempt_id,user_id,conversation_id,outbound_message_id,first_received_at,first_received_sequence,accepted_at,member_count)
+                    SELECT ?,?,?,?,o.id,i.received_at,i.received_sequence,o.created_at,1 FROM chat_message o JOIN chat_message i
+                      ON i.line_message_id=o.in_reply_to_message_id AND i.correlation_id=o.correlation_id AND i.user_id=o.user_id
+                    WHERE o.user_id=? AND o.direction='OUTBOUND' AND o.reply_kind='AI' AND o.correlation_id=? AND o.in_reply_to_message_id=?
+                      AND i.source_type='USER' AND i.message_type='TEXT' AND NOT EXISTS(SELECT 1 FROM ai_turn WHERE outbound_message_id=o.id)
+                    """,turnId,UUID.randomUUID(),user,user,user,correlation,replyTo);
+            if(inserted==1)jdbc.update("""
+                    INSERT INTO ai_turn_member(turn_id,member_order,inbound_message_id,user_id,conversation_id,webhook_event_id)
+                    SELECT ?,1,id,user_id,conversation_id,correlation_id FROM chat_message WHERE direction='INBOUND' AND line_message_id=?
+                    """,turnId,replyTo);
+        }
     }
 }

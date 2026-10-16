@@ -26,6 +26,12 @@ public interface ConversationMemory {
      */
     void save(String user, String owner, PrivateHistory history);
     /**
+     * LINE 明确接受后立即保留有界本地业务轮次，衔接异步数据库和缓存失败的间隙。
+     * @param user 完整用户标识
+     * @param turn 全部成员及已接受正文，不允许传入草稿或技术提示
+     */
+    void rememberAccepted(String user,PrivateHistory.Turn turn);
+    /**
      * 记录已知私聊入站时间，包含非文本/提示，不把它们作为正常模型轮次。
      * @param user 完整用户
      * @param id 入站消息 ID

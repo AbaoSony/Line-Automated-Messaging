@@ -65,6 +65,7 @@ public class ChatMessageService implements UserDataPurger {
 
     /**
      * 异步保存含来源、关联和生成用量的新入站或已接受出站；不传入事件凭证。
+     * 正常已接受 AI 回复由 ChatTurnService 整轮事务保存，本入口供原始入站和独立提示等记录使用。
      * @param userId 完整用户
      * @param direction INBOUND / OUTBOUND
      * @param messageId 入站幂等消息 ID，出站为空

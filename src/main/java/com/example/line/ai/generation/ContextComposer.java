@@ -43,13 +43,14 @@ public class ContextComposer {
         long used = base;
         while (start > 0) {
             var turn = turns.get(start-1);
-            int next = cost(turn.userText()) + cost(turn.assistantText());
+            long next = cost(turn.assistantText());
+            for(var member:turn.members())next+=cost(member.text());
             if (used + next > properties.maxInputTokens()) break;
             used += next; start--;
         }
         var result = new ArrayList<ChatRequest.HistoryMessage>();
         for (var turn : turns.subList(start, turns.size())) {
-            result.add(new ChatRequest.HistoryMessage("user", turn.userText()));
+            for(var member:turn.members())result.add(new ChatRequest.HistoryMessage("user",member.text()));
             result.add(new ChatRequest.HistoryMessage("assistant", turn.assistantText()));
         }
         return List.copyOf(result);

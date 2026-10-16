@@ -32,6 +32,7 @@ public class AiChatService {
     private final PersonaLoader persona;
     private final ContextComposer composer;
     private final ChatMessageService chat;
+    private final ChatTurnService acceptedTurns;
     private final LineMessageService messages;
     private final UserWorkTracker tracker;
     private final DependencyCalls dependencies;
@@ -54,15 +55,18 @@ public class AiChatService {
      * @param mapper 业务 JSON
      * @param aggregated P2 规则聚合入口
      * @param turnMode 显式单条兼容开关
+     * @param acceptedTurns 正常成功轮次事务
      */
     public AiChatService(AiProperties properties,SessionScheduler scheduler,RedisCoordination coordination,
                          ConversationMemory memory,ChatModelClient model,PersonaLoader persona,ContextComposer composer,
                          ChatMessageService chat,LineMessageService messages,UserWorkTracker tracker,
-                         DependencyCalls dependencies,MeterRegistry meters,ObjectMapper mapper,AggregatedChatFlow aggregated,TurnFlowProperties turnMode) {
+                         DependencyCalls dependencies,MeterRegistry meters,ObjectMapper mapper,AggregatedChatFlow aggregated,TurnFlowProperties turnMode,
+                         ChatTurnService acceptedTurns) {
         this.properties=properties;this.scheduler=scheduler;this.coordination=coordination;this.memory=memory;
         this.model=model;this.persona=persona;this.composer=composer;this.chat=chat;this.messages=messages;
         this.aggregated=aggregated;this.turnMode=turnMode;
         this.tracker=tracker;this.dependencies=dependencies;this.meters=meters;this.mapper=mapper;
+        this.acceptedTurns=acceptedTurns;
     }
     /**
      * 接收当前私聊并立即返回业务完成阶段，等待任务不占 Webhook 工作线程。
@@ -180,15 +184,23 @@ public class AiChatService {
             catch(RuntimeException failure){dependencyFailure("ownership",failure);skipped("ownership_unknown");return;}
         }
         if(!deadline.permits(Duration.ZERO)){skipped("deadline");return;}
+        var turnId=java.util.UUID.randomUUID();var sendId=java.util.UUID.randomUUID();
         messages.replyText(replyToken,text,deadline);
-        chat.recordMessage(input.userId(),"OUTBOUND",null,"TEXT",mapper.createObjectNode().put("text",text),Instant.now(),
-                metadata(input,kind,kind.equals("AI")?result:null));
+        AcceptedTurn accepted=null;
+        if(kind.equals("AI")) {
+            accepted=new AcceptedTurn(turnId,sendId,input.userId(),java.util.List.of(new AcceptedTurn.Input(input.messageId(),
+                    input.correlationId(),input.text(),input.content(),input.occurredAt(),input.receivedAt(),input.sequence(),
+                    java.util.Optional.ofNullable(org.slf4j.MDC.get("trace_id")).orElseGet(() -> java.util.UUID.randomUUID().toString()))),
+                    text,metadata(input,kind,result),Instant.now());
+            acceptedTurns.recordAccepted(accepted);
+            if(!tracker.blocked(input.userId()))memory.rememberAccepted(input.userId(),accepted.history());
+        } else chat.recordMessage(input.userId(),"OUTBOUND",null,"TEXT",mapper.createObjectNode().put("text",text),Instant.now(),metadata(input,kind,null));
         meters.counter("ai.reply.accepted","kind",kind).increment();
         if(kind.equals("FALLBACK"))meters.counter("ai.fallback.accepted").increment();
         if(kind.equals("AI") && snapshot!=null && !tracker.blocked(input.userId()) && deadline.permits(Duration.ZERO)) {
             var turns=new ArrayList<>(snapshot.turns());
             turns.removeIf(turn -> turn.messageId().equals(input.messageId()));
-            turns.add(new PrivateHistory.Turn(input.messageId(),input.correlationId(),input.text(),text,input.occurredAt(),input.receivedAt(),input.sequence()));
+            turns.add(accepted.history());
             try {memory.save(input.userId(),owner,new PrivateHistory(java.util.List.copyOf(turns),input.occurredAt()));}
             catch(RuntimeException failure){dependencyFailure("cache_write_after_reply",failure);}
         }

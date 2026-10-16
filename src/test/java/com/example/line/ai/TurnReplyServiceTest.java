@@ -22,7 +22,7 @@ class TurnReplyServiceTest {
         var decision=Binder.get(env).bindOrCreate("line.ai.decision",DecisionProperties.class);
         var line=mock(LineMessageService.class);
         var service=new TurnReplyService(ai,decision,line,mock(ChatMessageService.class),mock(ConversationMemory.class),
-                new UserWorkTracker(),new ObjectMapper(),new SimpleMeterRegistry());
+                new UserWorkTracker(),new ObjectMapper(),new SimpleMeterRegistry(),mock(com.example.line.chat.ChatTurnService.class));
         service.rejected(member("Ufictional-first",1),"fictional-first-hint",Deadline.current(Duration.ofSeconds(45)),"BUSY");
         service.rejected(member("Ufictional-second",2),"fictional-capacity-hint",Deadline.current(Duration.ofSeconds(45)),"RATE_LIMITED");
         service.rejected(member("Ufictional-first",3),"fictional-repeat-hint",Deadline.current(Duration.ofSeconds(45)),"FALLBACK");
