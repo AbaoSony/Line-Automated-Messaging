@@ -103,6 +103,38 @@ class UserPersistenceIntegrationTest extends PostgresIntegrationSupport {
         jdbc.update("INSERT INTO chat_message (user_id, direction, message_type, content) VALUES (?, 'OUTBOUND', 'TEXT', '{}'::jsonb)", USER);
     }
 
+    @Test void sameEventTimeUsesFrozenReceiptThenSequenceAndDuplicateIdCannotUpdateAgain(){
+        Instant at=Instant.parse("2026-10-17T01:00:00Z"),receipt=at.plusSeconds(1);
+        assertThat(apply(true,new LifecycleOrder(at,receipt,10,"fictional-first",false))).isTrue();
+        assertThat(apply(false,new LifecycleOrder(at,receipt,11,"fictional-second",false))).isTrue();
+        assertThat(status()).isEqualTo("UNFOLLOWED");
+        assertThat(apply(true,new LifecycleOrder(at,receipt,12,"fictional-third",false))).isTrue();
+        assertThat(apply(false,new LifecycleOrder(at,receipt,9,"fictional-older",false))).isFalse();
+        assertThat(apply(false,new LifecycleOrder(at,receipt.plusSeconds(2),20,"fictional-third",false))).isFalse();
+        assertThat(status()).isEqualTo("FOLLOWING");
+        assertThat(jdbc.queryForObject("SELECT lifecycle_sequence FROM line_user WHERE user_id=?",Long.class,USER)).isEqualTo(12);
+    }
+    @Test void sameTimeRedeliveryAndLegacyUnknownOrderingConservativelyKeepExistingState(){
+        Instant at=Instant.parse("2026-10-17T02:00:00Z");
+        assertThat(apply(true,new LifecycleOrder(at,at,1,"fictional-follow",false))).isTrue();
+        assertThat(apply(false,new LifecycleOrder(at,at.plusSeconds(1),2,"fictional-redelivery",true))).isFalse();
+        jdbc.update("UPDATE line_user SET lifecycle_received_at=NULL,lifecycle_sequence=NULL,lifecycle_event_id=NULL WHERE user_id=?",USER);
+        assertThat(apply(false,new LifecycleOrder(at,at.plusSeconds(2),3,"fictional-legacy-conflict",false))).isFalse();
+        assertThat(status()).isEqualTo("FOLLOWING");
+        assertThat(apply(false,new LifecycleOrder(at.plusSeconds(1),at.plusSeconds(3),4,"fictional-later",true))).isTrue();
+        assertThat(status()).isEqualTo("UNFOLLOWED");
+    }
+    @Test void timestampPrecisionMatchesPostgresAndInactiveAdmissionIsSilent(){
+        Instant at=Instant.parse("2026-10-17T03:00:00.123456789Z");
+        var order=new LifecycleOrder(at,at,1,"fictional-precision",false);
+        assertThat(order.occurredAt().getNano()).isEqualTo(123456000);
+        assertThat(apply(false,order)).isTrue();
+        users.admitActive(USER,com.example.line.common.execution.Deadline.current(java.time.Duration.ofSeconds(1)),
+                () -> {throw new AssertionError("unfollowed user admitted");}).toCompletableFuture().join();drain();
+        assertThat(status()).isEqualTo("UNFOLLOWED");
+    }
+    private boolean apply(boolean following,LifecycleOrder order){return users.recordStatus(USER,following,order).toCompletableFuture().join();}
+
     private void seedLogData() {
         jdbc.update("INSERT INTO event_log (id,ts,event,level,trace_id,user_id,detail,service,env,version,instance) "
                 + "VALUES (?,now(),'user.follow','INFO','fictional-old-trace',?,'{}','test','test','test','test')", java.util.UUID.randomUUID(), USER);

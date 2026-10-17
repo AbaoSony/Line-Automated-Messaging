@@ -72,8 +72,9 @@ public final class RecordQueue implements AutoCloseable {
     public boolean offer(boolean audit, Map<String, Object> fields) {
         var entry = new RecordedEntry(UUID.randomUUID(), audit, fields);
         boolean deletion=LogEvents.USER_DATA_DELETED.equals(fields.get("event"));
-        var lease=deletion ? null : tracker.register((String)fields.get("user_id"));
-        if(!deletion && lease==null) {
+        // 本次删除的记录可以越过自己的屏障，但不能让下一次删除忽略仍在途的历史审计。
+        var lease=deletion ? tracker.registerDeletionRecord((String)fields.get("user_id")) : tracker.register((String)fields.get("user_id"));
+        if(lease==null) {
             meters.counter("log.dropped").increment();
             if(audit)reportFailure(entry,"user_work_blocked",null);
             return false;

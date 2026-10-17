@@ -14,6 +14,7 @@ public class UserWorkTracker {
     private static final Duration TOMBSTONE_TTL = Duration.ofSeconds(75);
     private final Map<String, Slot> slots = new HashMap<>();
     private final java.util.function.LongSupplier clock;
+    private long epoch;
 
     /** 使用单调时钟跟踪在途工作和删除后的旧请求保护。 */
     public UserWorkTracker() { this(System::nanoTime); }
@@ -31,7 +32,7 @@ public class UserWorkTracker {
         Slot slot = slots.get(userId);
         if (slot == null) {
             if (slots.size() >= MAX_TRACKED_USERS) return null;
-            slot = new Slot();
+            slot = new Slot(++epoch);
             slots.put(userId, slot);
         }
         String received = MDC.get("received_nanos");
@@ -50,7 +51,7 @@ public class UserWorkTracker {
     public synchronized Barrier block(String userId) {
         prune();
         if (!slots.containsKey(userId) && slots.size() >= MAX_TRACKED_USERS) throw new IllegalStateException("User tracker capacity exceeded");
-        Slot slot = slots.computeIfAbsent(userId, ignored -> new Slot());
+        Slot slot = slots.computeIfAbsent(userId, ignored -> new Slot(++epoch));
         if (slot.blocked) throw new IllegalStateException("User deletion already in progress");
         slot.blocked = true;
         return new Barrier(userId, slot);
@@ -63,13 +64,69 @@ public class UserWorkTracker {
      */
     public synchronized boolean blocked(String userId) { return slots.containsKey(userId) && slots.get(userId).blocked; }
 
+    /**
+     * 只在有效私聊准入时绑定本地取消代次，随 MDC 传入模型和技术提示，不保存为日志字段。
+     * @param userId 已登记短时生命周期租约的用户
+     * @throws IllegalStateException 缺少工作登记时抛出
+     */
+    public synchronized void bindAiAdmission(String userId){
+        Slot slot=slots.get(userId);
+        if(slot==null)throw new IllegalStateException("AI admission has no work lease");
+        MDC.put("ai_work_epoch",Long.toString(slot.epoch));
+    }
+    /**
+     * 有效取消关注使旧正文和排队技术提示失效，不阻止其原文和真实发送结果落库。
+     * @param userId 当前生命周期工作已登记的用户
+     */
+    public synchronized void cancelAi(String userId){var slot=slots.get(userId);if(slot!=null)slot.epoch=++epoch;}
+    /**
+     * 原子核对私聊取消代次并登记发送；已经登记的在途发送继续真实收尾。
+     * @param userId 完整用户标识，非 AI 发送不带代次
+     * @return 有效发送租约；旧代次、删除或容量拒绝时为空
+     */
+    public synchronized Lease registerSending(String userId){
+        String captured=MDC.get("ai_work_epoch");Slot slot=slots.get(userId);
+        if(captured!=null && (slot==null || slot.epoch!=Long.parseLong(captured)))return null;
+        return register(userId);
+    }
+
+    /**
+     * 登记本次删除结束后产生的事件/审计，允许越过自己的屏障，但必须被下一次删除等待。
+     * @param userId 完整删除目标；未知目标允许为空
+     * @return 有界记录租约，容量不足时为空
+     */
+    public synchronized Lease registerDeletionRecord(String userId){
+        if(userId==null)return new Lease(null,null);
+        prune();Slot slot=slots.get(userId);
+        if(slot==null){if(slots.size()>=MAX_TRACKED_USERS)return null;slot=new Slot(++epoch);slots.put(userId,slot);}
+        slot.pending++;return new Lease(userId,slot);
+    }
+
+    /**
+     * 上游全部停止后等待实际生成、发送、业务写入及日志工作，不把 Future 取消当成排空。
+     * @param timeout 停机等待上限
+     * @throws IllegalStateException 仍有在途工作或被中断时抛出
+     */
+    public synchronized void awaitAll(Duration timeout) {
+        long end=clock.getAsLong()+timeout.toNanos();
+        while(slots.values().stream().anyMatch(slot -> slot.pending>0)) {
+            long left=end-clock.getAsLong();
+            if(left<=0)throw new IllegalStateException("User work shutdown did not drain");
+            try{java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this,left);}
+            catch(InterruptedException failure){Thread.currentThread().interrupt();throw new IllegalStateException("User work shutdown interrupted");}
+        }
+    }
+
     private void prune() {
         long cutoff = clock.getAsLong() - TOMBSTONE_TTL.toNanos();
         slots.entrySet().removeIf(entry -> entry.getValue().pending == 0 && !entry.getValue().blocked
                 && (!entry.getValue().deleted || entry.getValue().deletedAt < cutoff));
     }
 
-    private static final class Slot { int pending; boolean blocked,deleted; long deletedAt; }
+    private static final class Slot {
+        int pending;boolean blocked,deleted;long deletedAt,epoch;
+        Slot(long epoch){this.epoch=epoch;}
+    }
 
     /** 当前工作的计数租约，完成或拒绝后必须关闭。 */
     public final class Lease implements AutoCloseable {

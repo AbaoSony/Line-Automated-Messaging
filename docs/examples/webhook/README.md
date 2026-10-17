@@ -103,7 +103,7 @@ IDEA 环境中旧 AI_MAX_OUTPUT_TOKENS=1024 会覆盖新默认值，需替换成
 3. 等待执行/持久化/日志队列排空，再重投递相同事件，断言不生成、不再次 Reply；输出和日志不能包含三个凭证占位符。
 4. 普通运行的连发会受实际时机、固定截止、容量和一次撤销额度影响，可能形成待处理轮次；不能把这个可控轨迹当作所有连发都只调用一次模型的保证。
 
-多成员出站 content.ai_turn 仍保存完整成员，in_reply_to_message_id=null；第五阶段已建立 ai_turn/ai_turn_member，完整成功轮次已进入后续上下文。单成员原有示例与断言继续有效。MODEL 时机判断尚未实现，当前用 AI_DECISION_MODE=RULE；技术兜底仍默认静默。
+多成员出站 content.ai_turn 仍保存完整成员，in_reply_to_message_id=null；第五阶段已建立 ai_turn/ai_turn_member，完整成功轮次已进入后续上下文。单成员原有示例与断言继续有效。该可控示例显式用 AI_DECISION_MODE=RULE；第六阶段运行默认 MODEL，下面另有时机输出示例；技术兜底仍默认静默。
 
 
 ## P2 第四阶段未知发送示例（全部虚构，已实现）
@@ -122,3 +122,24 @@ ReplyOutcomeIntegrationTest 对原始字节签名并提交本地服务，屏障�
 DocumentedFlowIntegrationTest 在原三成员签名入站和一次真实 SDK/本地 Stub Reply 后，等待业务持久化排空，从 PostgreSQL 成功关联回源、确认三位成员完整存在，再逐字段比较 ContextComposer 展开的全部历史角色和原文与该文件一致。重新投递仍不能生成第二次出站。AggregatedFlowIntegrationTest 另外发送下一条问题，断言实际下一次模型调用包含这四条历史。
 
 运行时先停旧进程并备份，再用正常 IDEA/Maven 启动，Flyway 自动执行 V4；不手动改写 V1/V2/V3。旧 P1/过渡记录只有通过唯一、完整来源核对才进入新历史；无法核对的原始消息仍保留。Redis 使用 context-v2，旧 context 等待原 TTL；手动删除覆盖两代缓存和新表。测试只使用临时 PostgreSQL/Redis 与本地替身，没有迁移真实数据库或调用真实模型。
+
+
+## P2 第六阶段模型时机示例（全部虚构，已实现）
+
+`../reply/timing-wait-output.json` 表示 WAIT_FOR_MORE/200ms/POSSIBLE_CONTINUATION；`../reply/timing-now-output.json` 表示 REPLY_NOW/0ms/COMPLETE_INPUT。它们是完整虚构的策略模型输出，不是 LINE 请求，不含任何凭证。
+
+ModelTimingFlowIntegrationTest 用真实签名 Webhook、临时 PostgreSQL/Redis 和模型替身返回这两份原文：第一份登记原窗口内等待，定时醒来后第二份推进正常正文，只发一次 Reply；逐字段关联实际 event_log 的完整模型正文，检查轮次标识不变、年龄增加、余量减少、实际用量及默认静默。它还验证新输入失效旧建议、两次上限、非法输出回退、全局熔断/子并发和删除；真实 SDK 的参数与解析由 OpenAiTimingModelClientTest 在本地 HTTP 独立验证，取消/迟到分发由 ModelHttpTransportTest 验证。
+
+IDEA/Maven 中移除旧 AI_DECISION_MODE=RULE 或改为 MODEL 并重启，才使用新的默认模型时机；要维持规则基线继续设 RULE。策略默认独立 low/2s/两次/1024 输出，正文 Astra/max 和原 45s 总预算不变；过慢、非法或不可用时以规则推进正常正文，不发送技术兜底。单次策略耗时不承诺真实模型两秒完成，模型质量/LINE 真实收件另需人工验收。
+
+## P2 第七阶段生命周期（全部虚构，已实现）
+
+[webhook-follow.json](webhook-follow.json) → [webhook-unfollow.json](webhook-unfollow.json) → [webhook-refollow.json](webhook-refollow.json) → [webhook-hello.json](webhook-hello.json) 是完整联调顺序。Follow/Unfollow 为同事件时间、按本服务接收顺序生效；refollow 使用独立事件标识和更晚事件时间，恢复 FOLLOWING、清空 unfollowed_at。三个生命周期事件都不发送 Reply；hello 恢复正常 AI，出站仍逐字段比较已有 [reply-hello-request.json](../reply/reply-hello-request.json)。全部用户、消息、事件和凭证均为虚构占位符，不能请求真实 LINE。
+
+DocumentedFlowIntegrationTest 对原文件字节签名，验证真实 HTTP 200、权威状态及已有完整 LINE Stub 出站/凭证断言；没有删除既有断言，新增一次 refollow 后精确请求计数为 13。UserLifecycleFlowIntegrationTest 用虚构屏障轨迹另外验证：有效取消关注取消决策/正文及待处理、取消期间原文保留、提前重新关注不复活旧正文、旧/同时间重投递保护、SENDING 的明确接受/UNKNOWN、不补发，以及删除后新历史。UserLifecycleShutdownTest 使用真实 Spring 阶段及受控传输租约，验证实际工作未退出时持久化/日志不能提前关闭。
+
+同用户状态与短时 AI 准入复用原业务持久化池，全体待处理工作合计受 line.persistence.queue-capacity 限制；后台拒绝/依赖失败静默结束，完整入站独立尽力保存。准入原始截止到期只释放待准入回调，实际数据库退出前仍占删除/停机租约。升级前先停旧单实例并备份，启动自动执行 V5，不修改旧迁移；未迁移真实数据、未调用真实模型/LINE。第八阶段负载及真实体验仍需验证。
+
+DrainingTaskSchedulerTest 另验证正在运行的定时保留清理先于业务持久化和日志关闭；复用原定时清理用途与单线程，不改变清理开关默认值。
+
+第七阶段还复现并修复连续删除审计竞态：本次删除事件/审计允许越过自己的屏障入队，但持有独立工作租约至实际写入退出；下一次删除必须等待前一轮记录后再清理历史。RecordQueueTest 先复现旧实现漏等，再验证修复；不阻塞业务线程写日志，不改变审计失败隔离或默认数据保留。

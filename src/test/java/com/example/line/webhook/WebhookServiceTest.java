@@ -80,8 +80,10 @@ class WebhookServiceTest {
         var follow = mock(FollowEventHandler.class);
         var unfollow = mock(UnfollowEventHandler.class);
         var postback = mock(PostbackEventHandler.class);
-        when(follow.eventType()).thenReturn(FollowEvent.class); doCallRealMethod().when(follow).handleAsync(any());
-        when(unfollow.eventType()).thenReturn(UnfollowEvent.class); doCallRealMethod().when(unfollow).handleAsync(any());
+        when(follow.eventType()).thenReturn(FollowEvent.class);when(follow.handleAsync(any())).thenAnswer(call -> {
+            follow.handle(call.getArgument(0));return java.util.concurrent.CompletableFuture.completedFuture(null);});
+        when(unfollow.eventType()).thenReturn(UnfollowEvent.class);when(unfollow.handleAsync(any())).thenAnswer(call -> {
+            unfollow.handle(call.getArgument(0));return java.util.concurrent.CompletableFuture.completedFuture(null);});
         when(postback.eventType()).thenReturn(PostbackEvent.class); doCallRealMethod().when(postback).handleAsync(any());
         var service = new WebhookService(Runnable::run,
                 new EventDispatcher(List.of(follow, unfollow, postback)), cache());

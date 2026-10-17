@@ -38,6 +38,7 @@ public class AiChatService {
     private final DependencyCalls dependencies;
     private final MeterRegistry meters;
     private final ObjectMapper mapper;
+    private final com.example.line.user.UserService users;
     /**
      * 注入会话边界和 P0 记录能力，模型厂商类型不进入编排层。
      * @param properties 有界预算与话术
@@ -56,17 +57,19 @@ public class AiChatService {
      * @param aggregated P2 规则聚合入口
      * @param turnMode 显式单条兼容开关
      * @param acceptedTurns 正常成功轮次事务
+     * @param users 关注状态与短时准入排序边界
      */
     public AiChatService(AiProperties properties,SessionScheduler scheduler,RedisCoordination coordination,
                          ConversationMemory memory,ChatModelClient model,PersonaLoader persona,ContextComposer composer,
                          ChatMessageService chat,LineMessageService messages,UserWorkTracker tracker,
                          DependencyCalls dependencies,MeterRegistry meters,ObjectMapper mapper,AggregatedChatFlow aggregated,TurnFlowProperties turnMode,
-                         ChatTurnService acceptedTurns) {
+                         ChatTurnService acceptedTurns,com.example.line.user.UserService users) {
         this.properties=properties;this.scheduler=scheduler;this.coordination=coordination;this.memory=memory;
         this.model=model;this.persona=persona;this.composer=composer;this.chat=chat;this.messages=messages;
         this.aggregated=aggregated;this.turnMode=turnMode;
         this.tracker=tracker;this.dependencies=dependencies;this.meters=meters;this.mapper=mapper;
         this.acceptedTurns=acceptedTurns;
+        this.users=users;
     }
     /**
      * 接收当前私聊并立即返回业务完成阶段，等待任务不占 Webhook 工作线程。
@@ -75,13 +78,17 @@ public class AiChatService {
      * @return 当前处理终态，已成功 Reply 后缓存失败仍正常完成
      */
     public CompletionStage<Void> submit(AiInput input,String replyToken) {
+        // 原始消息先独立记录，取消关注、生命周期依赖失败和容量拒绝也不能丢失业务原文。
+        chat.recordMessage(input.userId(),"INBOUND",input.messageId(),"TEXT",input.content(),
+                input.occurredAt(),metadata(input,"LEGACY",null));
+        memory.observe(input.userId(),input.messageId(),input.occurredAt(),input.receivedAt(),input.sequence());
+        return users.admitActive(input.userId(),Deadline.current(properties.totalTimeout()),() -> submitActive(input,replyToken));
+    }
+    private CompletionStage<Void> submitActive(AiInput input,String replyToken) {
         if(turnMode.enabled()) return aggregated.submit(input,replyToken);
         Deadline deadline=Deadline.current(properties.totalTimeout());//接收到的时间 or 当前时间
         var lease=tracker.register(input.userId()); //同步锁控制用户线程
         if(lease==null) {skipped("deletion_barrier");return CompletableFuture.completedFuture(null);}
-        chat.recordMessage(input.userId(),"INBOUND",input.messageId(),"TEXT",input.content(),
-                input.occurredAt(),metadata(input,"LEGACY",null));
-        memory.observe(input.userId(),input.messageId(),input.occurredAt(),input.receivedAt(),input.sequence());
         return scheduler.submit(input.userId(),deadline,() -> process(input,replyToken,deadline),() -> {
             meters.counter("ai.queue.rejected").increment();
             BusinessLog.write(LoggerFactory.getLogger(getClass()),Level.WARN,LogEvents.AI_QUEUE_REJECTED,"AI session queue rejected",
@@ -178,7 +185,7 @@ public class AiChatService {
             skipped("technical_replies_disabled",kind);
             return;
         }
-        if(tracker.blocked(input.userId()) || !deadline.permits(Duration.ZERO)) {skipped("deadline_or_deletion");return;}
+        if(scheduler.currentTaskCancelled() || tracker.blocked(input.userId()) || !deadline.permits(Duration.ZERO)) {skipped("deadline_or_deletion_or_cancellation");return;}
         if(owner!=null) {
             try {if(!coordination.owns(input.userId(),owner)){skipped("lock_lost");return;}}
             catch(RuntimeException failure){dependencyFailure("ownership",failure);skipped("ownership_unknown");return;}

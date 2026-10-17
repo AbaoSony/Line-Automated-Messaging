@@ -235,7 +235,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     }
     @Test void deletionCancelsPendingGenerationWaitsInFlightAndOldResultCannotWriteBack() throws Exception {
         String user=user();var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
-        doAnswer(call -> {entered.countDown();assertThat(release.await(3,TimeUnit.SECONDS)).isTrue();return result("刪除前舊生成");}).when(testModel).generate(any());
+        doAnswer(call -> {entered.countDown();awaitActualExit(release);return result("刪除前舊生成");}).when(testModel).generate(any());
         var maintenance=Executors.newSingleThreadExecutor();
         try{
             send(user,"in-flight","原始訊息", "user","active");assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
@@ -254,6 +254,9 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(redis.opsForValue().get(key(user,"context-v2"))).contains("新的歷史").doesNotContain("刪除前舊生成");
         }finally{release.countDown();maintenance.shutdownNow();}
     }
+    private void awaitActualExit(CountDownLatch release){boolean interrupted=false;
+        try{while(true)try{assertThat(release.await(3,TimeUnit.SECONDS)).isTrue();return;}catch(InterruptedException failure){interrupted=true;}}
+        finally{if(interrupted)Thread.currentThread().interrupt();}}
     private ResponseEntity<String> send(String user,String id,String text,String source,String mode) throws Exception {
         var root=mapper.createObjectNode();root.put("destination","Ufictional-bot");var event=root.putArray("events").addObject();
         event.put("type","message").put("webhookEventId",id).put("mode",mode).put("timestamp",Instant.now().toEpochMilli()).put("replyToken","fake-ai-reply-token");
@@ -271,7 +274,7 @@ class AiFlowIntegrationTest extends PostgresIntegrationSupport {
     private void drain(){
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookAdmissionExecutor.getActiveCount()==0 && webhookAdmissionExecutor.getQueueSize()==0);
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookExecutor.getActiveCount()==0 && webhookExecutor.getQueueSize()==0);
-        await().atMost(Duration.ofSeconds(5)).until(scheduler::isIdle);
+        awaitAdmissions();await().atMost(Duration.ofSeconds(5)).until(scheduler::isIdle);
         await().atMost(Duration.ofSeconds(5)).until(() -> persistenceExecutor.getActiveCount()==0 && persistenceExecutor.getQueueSize()==0);
         await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
     }

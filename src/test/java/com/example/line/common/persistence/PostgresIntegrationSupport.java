@@ -7,7 +7,11 @@ import org.testcontainers.utility.DockerImageName;
 
 /** 统一启动测试专用 PostgreSQL，全部连接信息由容器生成；禁止回退真实数据库或跳过迁移。 */
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
+@org.springframework.test.context.TestPropertySource(properties="line.ai.decision.mode=RULE")
 public abstract class PostgresIntegrationSupport {
+    @org.springframework.beans.factory.annotation.Autowired
+    protected com.example.line.user.UserService testUsers;
+    protected void awaitAdmissions(){org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(testUsers::admissionsIdle);}
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     protected com.example.line.ai.generation.ChatModelClient testModel;
     @org.junit.jupiter.api.BeforeEach

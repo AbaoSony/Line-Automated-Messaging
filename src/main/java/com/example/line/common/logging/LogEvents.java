@@ -4,6 +4,9 @@ import java.util.Set;
 
 /** 固定事件名登记表，供业务日志与 EventRecorder 共用；新增名称及使用状态需同步 docs/日志规范.md。 */
 public final class LogEvents {
+    public static final String AI_DECISION_REQUESTED = "ai.decision.requested";
+    public static final String AI_DECISION_RESULT = "ai.decision.result";
+    public static final String AI_DECISION_FALLBACK = "ai.decision.fallback";
     public static final String AI_TURN_ADMITTED = "ai.turn.admitted";
     public static final String AI_TURN_DECIDED = "ai.turn.decided";
     public static final String AI_TURN_COMPLETED = "ai.turn.completed";
@@ -44,7 +47,7 @@ public final class LogEvents {
     public static final String HTTP_REQUEST_FAILED = "http.request.failed";
     public static final String APP_LIFECYCLE = "app.lifecycle";
 
-    private static final Set<String> REGISTERED = Set.of(USER_FOLLOW, USER_UNFOLLOW, USER_MESSAGE_RECEIVED,
+    private static final Set<String> REGISTERED = Set.of(AI_DECISION_REQUESTED,AI_DECISION_RESULT,AI_DECISION_FALLBACK,USER_FOLLOW, USER_UNFOLLOW, USER_MESSAGE_RECEIVED,
             USER_POSTBACK, USER_RATE_LIMITED, WEBHOOK_RECEIVED, WEBHOOK_SIGNATURE_INVALID, WEBHOOK_DUPLICATE,
             AI_GENERATE_SUCCESS, AI_GENERATE_FAILED, AI_FALLBACK_USED, LINE_REPLY_SENT, LINE_REPLY_FAILED,
             LINE_PUSH_SENT, LINE_PUSH_FAILED, LINE_RETRY, MEMORY_CACHE_MISS, LOCK_TIMEOUT, EXECUTOR_REJECTED,

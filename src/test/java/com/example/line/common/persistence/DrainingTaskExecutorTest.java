@@ -21,6 +21,15 @@ import static org.assertj.core.api.Assertions.*;
 
 /** 验证真实 Spring 停机先排空上游业务，再排空异步落库，最后刷完日志队列。 */
 class DrainingTaskExecutorTest {
+    @Test void shutdownTimeoutReportsFailureAndStillNotifiesSpringWithoutPretendingWorkerExited()throws Exception{
+        var pool=executor(DrainingTaskExecutor.PERSISTENCE_PHASE);pool.setAwaitTerminationMillis(20);pool.initialize();
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);var notified=new java.util.concurrent.atomic.AtomicBoolean();
+        pool.execute(() -> {entered.countDown();try{assertThat(release.await(2,TimeUnit.SECONDS)).isTrue();}catch(InterruptedException failure){throw new AssertionError(failure);}});
+        try{assertThat(entered.await(1,TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> pool.stop(() -> notified.set(true))).isInstanceOf(IllegalStateException.class).hasMessageContaining("did not drain");
+            assertThat(notified).isTrue();assertThat(pool.getThreadPoolExecutor().isTerminated()).isFalse();
+        }finally{release.countDown();assertThat(pool.getThreadPoolExecutor().awaitTermination(1,TimeUnit.SECONDS)).isTrue();pool.destroy();}
+    }
     @Test
     void contextShutdownFlushesEventsEmittedByBothProducerPools() throws Exception {
         var written = new CopyOnWriteArrayList<RecordedEntry>();

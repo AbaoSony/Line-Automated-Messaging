@@ -147,7 +147,7 @@ public class LineMessageService {
     }
 
     private com.example.line.common.execution.UserWorkTracker.Lease sending(String user,boolean push) {
-        var lease=tracker.register(user);
+        var lease=tracker.registerSending(user);
         if(lease==null) {
             BusinessLog.write(log,Level.WARN,push?LogEvents.LINE_PUSH_FAILED:LogEvents.LINE_REPLY_FAILED,
                     "LINE send blocked by user work boundary",BusinessLog.fields("outcome","FAILED","reason","user_work_blocked","delivery_outcome",LineSendException.DeliveryOutcome.NOT_SENT));

@@ -80,7 +80,8 @@ public final class TurnCoordinator {
         Objects.requireNonNull(advice);
         return control(() -> {
             TurnSlot turn = current(ticket);
-            if (turn == null || turn.state != TurnState.DECIDING || turn.call.answered || ticket.kind() == TurnTicket.Kind.GENERATION) return false;
+            if (turn == null || turn.state != TurnState.DECIDING || turn.call.answered || ticket.kind() == TurnTicket.Kind.GENERATION
+                    || ticket.kind()==TurnTicket.Kind.DECISION && !turn.call.deadline.permits(Duration.ZERO)) return false;
             turn.call.answered = true;
             long remaining = turn.budget.collectionDeadline().remaining().toNanos();
             boolean rule = ticket.kind() == TurnTicket.Kind.RULE;
@@ -185,14 +186,14 @@ public final class TurnCoordinator {
      * 取消用户未发送轮次并失效旧回调；发送中仅请求中断，等待实际退出及结果收尾。
      * @param userId 完整用户标识
      */
-    public void cancel(String userId) { control(() -> { cancelSession(sessions.get(userId)); return null; }); }
+    public void cancel(String userId) { control(() -> { cancelSession(sessions.get(userId),true); return null; }); }
 
     void requireDrained(String userId) {
         synchronized (gate) { if (sessions.containsKey(userId)) throw new IllegalStateException("User turn work has not drained"); }
     }
 
     /** 停止准入、取消未发送工作；线程池由 SessionScheduler 等待和关闭。 */
-    public void stop() { control(() -> { accepting = false; List.copyOf(sessions.values()).forEach(this::cancelSession); return null; }); }
+    public void stop() { control(() -> { accepting = false; List.copyOf(sessions.values()).forEach(session -> cancelSession(session,false)); return null; }); }
 
     /** @return 会话、排队、实际执行及业务快照全部排空时返回 true */
     public boolean isIdle() { synchronized (gate) { return sessions.isEmpty() && running == 0 && buffer.members() == 0; } }
@@ -281,12 +282,12 @@ public final class TurnCoordinator {
             notifications.add(() -> { if (job.cancelQueued() && executor instanceof ThreadPoolExecutor pool) pool.remove(job); });
         }
     }
-    private void cancelSession(Session session) {
+    private void cancelSession(Session session,boolean interruptSending) {
         if (session == null) return;
         session.closing = true;
         for (var turn : turns(session)) {
             if (!turn.state.terminal() && turn.state != TurnState.SENDING) finish(turn, TurnState.CANCELLED, TurnResult.Reason.CANCELLED);
-            interrupt(turn);
+            if(turn.state!=TurnState.SENDING || interruptSending)interrupt(turn);
         }
     }
     private void finish(TurnSlot turn, TurnState state, TurnResult.Reason reason) {
@@ -349,7 +350,7 @@ public final class TurnCoordinator {
         var call = turn.start(type, generationLimit, decision, clock, buffer);
         Deadline deadline = call.deadline;
         alarm(turn, deadline.expiresNanos(), () -> {
-            if (turn.state == TurnState.DECIDING) { turn.fallback = true; makeReady(turn); }
+            if (turn.state == TurnState.DECIDING) { turn.fallback = true; }
             else if (turn.state == TurnState.GENERATING) finish(turn, TurnState.FAILED, TurnResult.Reason.DEADLINE);
             interrupt(turn);
         });

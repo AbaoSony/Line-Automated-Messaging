@@ -42,7 +42,7 @@ class SessionSchedulerTest {
         var scheduler=new SessionScheduler(settings(2,1,Duration.ofSeconds(2)),new SimpleMeterRegistry());
         var entered=new CountDownLatch(1);var release=new CountDownLatch(1);var rejected=new CountDownLatch(1);var closed=new AtomicInteger();
         try{
-            scheduler.submit("one",deadline(),() -> {entered.countDown();waitFor(release);},() -> fail("unexpected"),closed::incrementAndGet);waitFor(entered);
+            scheduler.submit("one",deadline(),() -> {entered.countDown();waitActualExit(release);},() -> fail("unexpected"),closed::incrementAndGet);waitFor(entered);
             var queued=scheduler.submit("one",deadline(),() -> fail("deleted queued task executed"),() -> fail("deleted task sent hint"),closed::incrementAndGet);
             var overflow=scheduler.submit("one",deadline(),() -> fail("overflow executed"),rejected::countDown,closed::incrementAndGet);
             waitFor(rejected);overflow.toCompletableFuture().get(3,TimeUnit.SECONDS);assertThat(overflow.toCompletableFuture().isDone()).isTrue();scheduler.cancel("one");
@@ -50,6 +50,19 @@ class SessionSchedulerTest {
             await().atMost(Duration.ofSeconds(3)).until(scheduler::isIdle);assertThat(closed.get()).isEqualTo(3);
         }finally{release.countDown();scheduler.stop();}
     }
+    @Test void cancelledRunningLegacyTaskStaysCancelledAfterLateModelExitAndRetainsActualCompletion()throws Exception{
+        var scheduler=new SessionScheduler(settings(2,1,Duration.ofSeconds(2)),new SimpleMeterRegistry());
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);var cancelled=new java.util.concurrent.atomic.AtomicBoolean();
+        try{
+            var running=scheduler.submit("one",deadline(),() -> {entered.countDown();waitActualExit(release);cancelled.set(scheduler.currentTaskCancelled());},
+                    () -> fail("unexpected rejection"),() -> {});waitFor(entered);scheduler.cancel("one");
+            assertThat(running.toCompletableFuture()).isNotDone();assertThat(scheduler.isIdle()).isFalse();
+            release.countDown();running.toCompletableFuture().get(1,TimeUnit.SECONDS);assertThat(cancelled).isTrue();
+        }finally{release.countDown();scheduler.stop();}
+    }
+    private static void waitActualExit(CountDownLatch release){boolean interrupted=false;
+        try{while(true)try{assertThat(release.await(3,TimeUnit.SECONDS)).isTrue();return;}catch(InterruptedException failure){interrupted=true;}}
+        finally{if(interrupted)Thread.currentThread().interrupt();}}
     @Test void queuedDeadlineExpiresWithoutOccupyingWorkerOrInvokingModel(){
         var scheduler=new SessionScheduler(settings(10,3,Duration.ofMillis(30)),new SimpleMeterRegistry());
         var entered=new CountDownLatch(1);var release=new CountDownLatch(1);var rejected=new CountDownLatch(1);

@@ -14,6 +14,28 @@ import static org.assertj.core.api.Assertions.*;
 
 /** 用可控时钟验证轮次转换、版本、固定等待、共享调用上限和不同用户公平执行。 */
 class TurnCoordinatorTest extends TurnTestSupport {
+    @Test void lateAdviceCannotApplyAfterAttemptDeadlineEvenBeforeItsExecutionHasExited(){
+        var rejected=new java.util.concurrent.atomic.AtomicBoolean();
+        setup((ticket,snapshot,deadline) -> {
+            if(ticket.kind()==TurnTicket.Kind.DECISION){timer.advanceTo(2);rejected.set(!coordinator.completeDecision(ticket,now()));}
+            else if(ticket.kind()==TurnTicket.Kind.RULE)coordinator.completeDecision(ticket,now());else accepted(ticket);
+        });
+        var first=admit("user",1);executor.drain();assertThat(rejected).isTrue();assertThat(result(first).state()).isEqualTo(TurnState.ACCEPTED);
+    }
+    @Test void timedOutModelUsesLatestRuleSnapshotAndOnlyOneRuleWaitBeforeNormalGeneration(){
+        var order=new java.util.ArrayList<TurnTicket.Kind>();
+        setup((ticket,snapshot,deadline) -> {
+            order.add(ticket.kind());
+            if(ticket.kind()==TurnTicket.Kind.DECISION){timer.advanceTo(2);return;}
+            if(ticket.kind()==TurnTicket.Kind.RULE)coordinator.completeDecision(ticket,waitMore(100));
+            else accepted(ticket);
+        });
+        var first=admit("user",1);executor.drain();
+        assertThat(order).containsExactly(TurnTicket.Kind.DECISION,TurnTicket.Kind.RULE);
+        assertThat(first.completion().toCompletableFuture().isDone()).isFalse();
+        timer.advanceTo(3);executor.drain();assertThat(result(first).state()).isEqualTo(TurnState.ACCEPTED);
+        assertThat(order).containsExactly(TurnTicket.Kind.DECISION,TurnTicket.Kind.RULE,TurnTicket.Kind.RULE,TurnTicket.Kind.GENERATION);
+    }
     @Test
     void threeMessagesBeforeFirstExecutionShareOneGenerationOneSendAndOrderedSnapshot() {
         var kinds = new ArrayList<TurnTicket.Kind>();

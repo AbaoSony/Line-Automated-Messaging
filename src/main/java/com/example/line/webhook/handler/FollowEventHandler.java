@@ -35,12 +35,21 @@ public class FollowEventHandler implements EventHandler<FollowEvent> {
      * @param event 非 null 的关注事件，source 缺失时允许记录 null 用户标识
      * @throws NullPointerException event 为 null 时抛出；调用方应保证有效事件
      */
-    public void handle(FollowEvent event) {
-        users.recordStatus(event.source() == null ? null : event.source().userId(), true, event.timestamp() == null
-                ? java.time.Instant.now() : java.time.Instant.ofEpochMilli(event.timestamp()));
-        BusinessLog.write(log, Level.INFO, LogEvents.USER_FOLLOW, "LINE follow userId={}, eventId={}",
-                BusinessLog.fields("user_id", event.source() == null ? null : event.source().userId(),
-                        "webhook_event_id", event.webhookEventId(), "outcome", "SUCCESS"),
-                event.source() == null ? null : event.source().userId(), event.webhookEventId());
+    public void handle(FollowEvent event) { handleAsync(event); }
+
+    /**
+     * 在有界异步生命周期入口比较原始排序，仅有效状态变更触发业务通知；不保存 SDK 事件。
+     * @param event 当前follow事件
+     * @return 状态处理结束，失败已安全记录，不要求 Webhook 重试
+     */
+    @Override public java.util.concurrent.CompletionStage<Void> handleAsync(FollowEvent event) {
+        String user=event.source()==null?null:event.source().userId();
+        String id=event.webhookEventId();
+        var at=event.timestamp()==null?java.time.Instant.now():java.time.Instant.ofEpochMilli(event.timestamp());
+        boolean redelivery=event.deliveryContext()!=null && Boolean.TRUE.equals(event.deliveryContext().isRedelivery());
+        var order=com.example.line.user.LifecycleOrder.current(at,id,redelivery);
+        return users.recordStatus(user,true,order).thenAccept(applied ->
+            BusinessLog.write(log,Level.INFO,LogEvents.USER_FOLLOW,"LINE follow userId={}, eventId={}",
+                BusinessLog.fields("user_id",user,"webhook_event_id",id,"outcome",applied?"SUCCESS":"SKIPPED"),user,id));
     }
 }

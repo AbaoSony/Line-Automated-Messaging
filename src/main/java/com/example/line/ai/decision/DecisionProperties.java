@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * 定义 P2 时机判断、全局熔断及技术提示冷却的配置契约。
- * 模型名称由已有模型配置提供，不引入厂商对象；第三阶段运行配置显式选 RULE，MODEL 留待第六阶段。
+ * 模型名称由已有模型配置提供，不引入厂商对象；MODEL 默认使用结构化建议，RULE 保留可比较基线。
  */
 @ConfigurationProperties("line.ai.decision")
 public record DecisionProperties(

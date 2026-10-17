@@ -5,7 +5,9 @@ import com.example.line.ai.TurnFlowProperties;
 import com.example.line.ai.aggregation.AggregationProperties;
 import com.example.line.ai.decision.DecisionProperties;
 import com.openai.client.OpenAIClient;
-import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.client.OpenAIClientImpl;
+import com.openai.core.ClientOptions;
+import com.example.line.ai.generation.transport.ModelHttpTransport;
 import com.openai.core.LogLevel;
 import com.openai.core.Timeout;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -19,8 +21,9 @@ import org.springframework.context.annotation.Configuration;
 class GenerationConfig {
     @Bean(destroyMethod = "close")
     OpenAIClient openAIClient(ApiCredentials credentials, ModelProperties properties) {
-        return OpenAIOkHttpClient.builder().apiKey(credentials.apiKey()).maxRetries(0).logLevel(LogLevel.OFF)
+        return new OpenAIClientImpl(ClientOptions.builder().httpClient(new ModelHttpTransport())
+                .apiKey(credentials.apiKey()).maxRetries(0).logLevel(LogLevel.OFF)
                 .timeout(Timeout.builder().connect(properties.connectTimeout()).read(properties.attemptTimeout())
-                        .write(properties.attemptTimeout()).request(properties.attemptTimeout()).build()).build();
+                        .write(properties.attemptTimeout()).request(properties.attemptTimeout()).build()).build());
     }
 }

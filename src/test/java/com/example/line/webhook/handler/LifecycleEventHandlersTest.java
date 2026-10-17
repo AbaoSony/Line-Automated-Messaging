@@ -20,7 +20,11 @@ class LifecycleEventHandlersTest {
     @Test
     void followRecordsUserIdWithoutLeakingReplyToken(CapturedOutput output) throws Exception {
         var event = (FollowEvent) event("follow");
-        var handler = new FollowEventHandler(org.mockito.Mockito.mock(com.example.line.user.UserService.class));
+        var users=org.mockito.Mockito.mock(com.example.line.user.UserService.class);
+        org.mockito.Mockito.when(users.recordStatus(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.eq(true),
+                org.mockito.ArgumentMatchers.any(com.example.line.user.LifecycleOrder.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedStage(true));
+        var handler = new FollowEventHandler(users);
         assertThat(handler.eventType()).isEqualTo(FollowEvent.class);
         handler.handle(event);
         assertThat(output).contains("LINE follow userId=" + event.source().userId(), event.webhookEventId())
@@ -31,7 +35,11 @@ class LifecycleEventHandlersTest {
     @Test
     void unfollowRecordsUserId(CapturedOutput output) throws Exception {
         var event = (UnfollowEvent) event("unfollow");
-        var handler = new UnfollowEventHandler(org.mockito.Mockito.mock(com.example.line.user.UserService.class));
+        var users=org.mockito.Mockito.mock(com.example.line.user.UserService.class);
+        org.mockito.Mockito.when(users.recordStatus(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.any(com.example.line.user.LifecycleOrder.class)))
+                .thenReturn(java.util.concurrent.CompletableFuture.completedStage(true));
+        var handler = new UnfollowEventHandler(users);
         assertThat(handler.eventType()).isEqualTo(UnfollowEvent.class);
         handler.handle(event);
         assertThat(output).contains("LINE unfollow userId=" + event.source().userId(), event.webhookEventId());

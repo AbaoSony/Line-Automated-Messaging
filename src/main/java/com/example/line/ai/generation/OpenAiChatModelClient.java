@@ -11,6 +11,7 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
 import com.openai.models.responses.*;
+import com.example.line.ai.generation.transport.ModelCallScope;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -60,10 +61,11 @@ public final class OpenAiChatModelClient implements ChatModelClient {
             Duration timeout = deadline.limit(properties.attemptTimeout());
             long started = System.nanoTime();
             CompletableFuture<Response> pending = null;
-            try {
+            try (var physical=ModelCallScope.open()) {
                 var options = RequestOptions.builder().timeout(Timeout.builder()
                         .connect(min(timeout,properties.connectTimeout())).read(timeout).write(timeout).request(timeout).build()).build();
-                pending = client.async().responses().create(params, options);
+                pending = client.async().responses().create(params.toBuilder().putAdditionalHeader(ModelCallScope.HEADER,physical.id()).build(), options);
+                physical.track(pending);
                 Response response = pending.get(deadline.limit(timeout).toNanos(), TimeUnit.NANOSECONDS);
                 if (!deadline.permits(Duration.ZERO)) throw new ModelFailure("deadline");
                 var text = new StringBuilder();

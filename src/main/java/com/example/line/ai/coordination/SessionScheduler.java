@@ -24,6 +24,7 @@ public class SessionScheduler implements SmartLifecycle, com.example.line.user.U
     private int running,queued;
     private boolean accepting=true;
     private volatile TurnCoordinator turns;
+    private final ThreadLocal<Task> activeTask=new ThreadLocal<>();
 
     /**
      * 创建有界会话调度与独立过期计时器，空闲用户状态随队列结束清理。
@@ -87,7 +88,7 @@ public class SessionScheduler implements SmartLifecycle, com.example.line.user.U
         return completion;
     }
     /**
-     * 删除屏障取消该用户全部等待任务；正在执行的任务由工作跟踪器等待或在发送前中止。
+     * 删除或有效取消关注使该用户未发送任务失效；逐条工作中断后仍等待实际退出并拒绝迟到发送。
      * @param user 完整用户
      */
     public void cancel(String user) {
@@ -98,6 +99,7 @@ public class SessionScheduler implements SmartLifecycle, com.example.line.user.U
     private void cancelLegacy(String user) {
         Lane lane=lanes.get(user);
         if(lane==null) return;
+        if(lane.current!=null){lane.current.stopped=true;if(lane.current.thread!=null)lane.current.thread.interrupt();}
         for(var task:lane.tasks) { task.expiry.cancel(false);task.cancelled.run();task.result.complete(null);queued--; }
         lane.tasks.clear();ready.remove(user);
         if(!lane.active) lanes.remove(user);
@@ -146,15 +148,17 @@ public class SessionScheduler implements SmartLifecycle, com.example.line.user.U
         while(running<properties.workers() && !ready.isEmpty()) {
             String user=ready.removeFirst();Lane lane=lanes.get(user);
             if(lane==null || lane.active || lane.tasks.isEmpty()) continue;
-            var task=lane.tasks.removeFirst();task.expiry.cancel(false);lane.active=true;running++;queued--;
+            var task=lane.tasks.removeFirst();task.expiry.cancel(false);lane.active=true;lane.current=task;running++;queued--;
             workers.execute(() -> {
-                try {task.action.run();task.result.complete(null);} catch(RuntimeException failure){task.result.completeExceptionally(failure);}
-                finally {task.cancelled.run();finished(user);}
+                synchronized(this){task.thread=Thread.currentThread();if(task.stopped)task.thread.interrupt();}
+                activeTask.set(task);
+                try {if(!task.stopped)task.action.run();task.result.complete(null);} catch(RuntimeException failure){task.result.completeExceptionally(failure);}
+                finally {activeTask.remove();task.cancelled.run();finished(user);}
             });
         }
     }
     private synchronized void finished(String user) {
-        running--;Lane lane=lanes.get(user);lane.active=false;
+        running--;Lane lane=lanes.get(user);lane.active=false;lane.current=null;
         if(lane.tasks.isEmpty()) lanes.remove(user);else ready.addLast(user);
         dispatch();notifyAll();
     }
@@ -163,24 +167,36 @@ public class SessionScheduler implements SmartLifecycle, com.example.line.user.U
     /** @return 是否仍接收当前会话 */
     @Override public synchronized boolean isRunning() {return accepting;}
     /** @return 位于 Webhook 排空之后、业务落库排空之前的生命周期阶段 */
-    @Override public int getPhase() {return com.example.line.common.persistence.DrainingTaskExecutor.PERSISTENCE_PHASE+2;}
-    /** 优雅停机停止接收，取消等待任务并等待当前短时处理结束。 */
+    @Override public int getPhase() {return com.example.line.common.persistence.DrainingTaskExecutor.PERSISTENCE_PHASE+3;}
+    /**
+     * 优雅停机停止接收，取消未发送任务；SENDING 与提示共享一个有限收尾预算。
+     * @throws IllegalStateException 未实际排空或等待中断时抛出
+     */
     @Override public void stop() {
         TurnCoordinator current;
         synchronized(this) {accepting=false;current=turns;for(String user:List.copyOf(lanes.keySet())) cancelLegacy(user);}
         if(current!=null)current.stop();
         timer.shutdownNow();workers.shutdown();hints.shutdown();
+        long end=System.nanoTime()+properties.totalTimeout().toNanos();
         try {
-            if(!workers.awaitTermination(properties.totalTimeout().plusSeconds(1).toMillis(),TimeUnit.MILLISECONDS)) workers.shutdownNow();
-            if(!hints.awaitTermination(properties.totalTimeout().plusSeconds(1).toMillis(),TimeUnit.MILLISECONDS)) hints.shutdownNow();
+            boolean ended=workers.awaitTermination(Math.max(0,end-System.nanoTime()),TimeUnit.NANOSECONDS);
+            ended=hints.awaitTermination(Math.max(0,end-System.nanoTime()),TimeUnit.NANOSECONDS) && ended;
+            if(!ended){workers.shutdownNow();hints.shutdownNow();
+                com.example.line.common.logging.BusinessLog.write(org.slf4j.LoggerFactory.getLogger(getClass()),org.slf4j.event.Level.ERROR,
+                        com.example.line.common.logging.LogEvents.EXECUTOR_REJECTED,"AI shutdown did not drain",
+                        com.example.line.common.logging.BusinessLog.fields("reason","shutdown_not_drained","outcome","FAILED"));
+                throw new IllegalStateException("AI shutdown did not drain");}
         }
-        catch(InterruptedException failure){workers.shutdownNow();hints.shutdownNow();Thread.currentThread().interrupt();}
+        catch(InterruptedException failure){workers.shutdownNow();hints.shutdownNow();Thread.currentThread().interrupt();throw new IllegalStateException("AI shutdown interrupted");}
     }
     /** @return 会话及拒绝提示均已排空时返回 true */
     public synchronized boolean isIdle() {return running==0 && queued==0 && hints.getActiveCount()==0 && hints.getQueue().isEmpty() && (turns==null || turns.isIdle());}
-    private static final class Lane {boolean active;final ArrayDeque<Task> tasks=new ArrayDeque<>();}
+    /** @return 逐条兼容模式的当前任务已取消时为 true，迟到模型不能在重新关注后发送 */
+    public boolean currentTaskCancelled(){var task=activeTask.get();return task!=null && task.stopped;}
+    private static final class Lane {boolean active;Task current;final ArrayDeque<Task> tasks=new ArrayDeque<>();}
     private static final class Task {
         final Runnable action,rejected,cancelled;final CompletableFuture<Void> result;ScheduledFuture<?> expiry;
+        volatile boolean stopped;Thread thread;
         Task(Runnable action,Runnable rejected,Runnable cancelled,CompletableFuture<Void> result){this.action=action;this.rejected=rejected;this.cancelled=cancelled;this.result=result;}
     }
 }

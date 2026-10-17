@@ -190,11 +190,11 @@ class AggregatedFlowIntegrationTest extends PostgresIntegrationSupport {
         }).when(rules).decide(anyList(),any());
     }
     private void awaitInbound(String user,int count) {
-        await().atMost(Duration.ofSeconds(4)).until(() -> jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='INBOUND'",Integer.class,user)==count);
+        await().atMost(Duration.ofSeconds(4)).until(() -> jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='INBOUND'",Integer.class,user)==count);awaitAdmissions();
     }
     private void drain() {
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookAdmissionExecutor.getActiveCount()==0 && webhookAdmissionExecutor.getQueueSize()==0);
-        await().atMost(Duration.ofSeconds(6)).until(scheduler::isIdle);
+        awaitAdmissions();await().atMost(Duration.ofSeconds(6)).until(scheduler::isIdle);
         await().atMost(Duration.ofSeconds(5)).until(() -> persistenceExecutor.getActiveCount()==0 && persistenceExecutor.getQueueSize()==0);
         await().atMost(Duration.ofSeconds(5)).until(recorder::isIdle);
     }

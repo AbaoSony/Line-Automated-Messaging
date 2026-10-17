@@ -11,6 +11,15 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(PersistenceProperties.class)
 class PersistenceConfig {
+    private static final int RETENTION_WORKERS=1;
+    @Bean
+    DrainingTaskScheduler taskScheduler(PersistenceProperties properties) {
+        var scheduler=new DrainingTaskScheduler();scheduler.setPoolSize(RETENTION_WORKERS);
+        scheduler.setThreadNamePrefix("line-retention-");scheduler.setPhase(DrainingTaskExecutor.WEBHOOK_PHASE+2);
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);scheduler.setAwaitTerminationMillis(properties.shutdownTimeout().toMillis());
+        scheduler.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        scheduler.setRemoveOnCancelPolicy(true);return scheduler;
+    }
     @Bean
     ThreadPoolTaskExecutor persistenceExecutor(PersistenceProperties properties, MeterRegistry meters) {
         var executor = new DrainingTaskExecutor();

@@ -1,7 +1,9 @@
 package com.example.line.ai.generation;
 
 import com.example.line.common.execution.Deadline;
-import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.client.OpenAIClientImpl;
+import com.openai.core.ClientOptions;
+import com.example.line.ai.generation.transport.ModelHttpTransport;
 import com.openai.core.LogLevel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,8 +59,8 @@ class OpenAiAdapterTest {
             finally {exchange.close();}
         });
         server.start();
-        client=OpenAIOkHttpClient.builder().baseUrl("http://127.0.0.1:"+server.getAddress().getPort()+"/v1")
-                .apiKey("fake-adapter-api-key").maxRetries(0).logLevel(LogLevel.OFF).build();
+        client=new OpenAIClientImpl(ClientOptions.builder().httpClient(new ModelHttpTransport()).baseUrl("http://127.0.0.1:"+server.getAddress().getPort()+"/v1")
+                .apiKey("fake-adapter-api-key").maxRetries(0).logLevel(LogLevel.OFF).build());
     }
     @AfterEach void close(){release.countDown();client.close();server.stop(0);}
     private ChatRequest request(Duration budget){return new ChatRequest("虛構 system",List.of(new ChatRequest.HistoryMessage("user","原始歷史"),

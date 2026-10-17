@@ -18,7 +18,7 @@ import org.slf4j.MDC;
 import org.slf4j.event.Level;
 import org.springframework.stereotype.Service;
 
-/** P2 实际私聊入口：逐条记录及限流，唯一轮次协调器收集，规则决定时机，正文完整保留成员边界。 */
+/** P2 实际私聊入口：逐条记录/限流、唯一协调器收集，模型或规则决定时机，正文保留完整成员边界。 */
 @Service
 public class AggregatedChatFlow {
     private static final int MAX_REPLY_CHARACTERS = 5000;
@@ -37,6 +37,7 @@ public class AggregatedChatFlow {
     private final UserWorkTracker tracker;
     private final DependencyCalls dependencies;
     private final RuleTimingPolicy rules;
+    private final TurnTimingService timing;
     private final TurnReplyService replies;
     private final MeterRegistry meters;
     private TurnCoordinator turns;
@@ -59,28 +60,28 @@ public class AggregatedChatFlow {
      * @param rules 规则时机建议
      * @param replies 一次发送与结果记录
      * @param meters 无用户标签指标
+     * @param timing 结构化时机判断与全局回退
      */
     public AggregatedChatFlow(AiProperties ai,TurnFlowProperties mode,AggregationProperties aggregation,DecisionProperties decision,
                               ModelProperties modelProperties,SessionScheduler scheduler,RedisCoordination coordination,
                               ConversationMemory memory,ChatModelClient model,PersonaLoader persona,ContextComposer composer,
                               ChatMessageService chat,UserWorkTracker tracker,DependencyCalls dependencies,RuleTimingPolicy rules,
-                              TurnReplyService replies,MeterRegistry meters) {
+                              TurnReplyService replies,MeterRegistry meters,TurnTimingService timing) {
         this.ai=ai;this.mode=mode;this.aggregation=aggregation;this.decision=decision;this.modelProperties=modelProperties;
         this.scheduler=scheduler;this.coordination=coordination;this.memory=memory;this.model=model;this.persona=persona;
         this.composer=composer;this.chat=chat;this.tracker=tracker;this.dependencies=dependencies;this.rules=rules;this.replies=replies;this.meters=meters;
+        this.timing=timing;
     }
     /**
-     * 启动时互斥切换到轮次流程；尚未实现的 MODEL 模式明确失败，不能悄悄冒充模型判断。
-     * @throws IllegalArgumentException 当前阶段选择 MODEL 时抛出
+     * 启动时互斥切换轮次流程，MODEL/RULE 共用唯一状态与执行额度。
      */
     @PostConstruct public void initialize() {
         if (!mode.enabled()) return;
-        if (decision.mode()!=DecisionProperties.Mode.RULE) throw new IllegalArgumentException("P2 MODEL decision is not implemented; use AI_DECISION_MODE=RULE");
         turns=scheduler.enableTurns(aggregation,decision,modelProperties.totalTimeout(),this::execute);
     }
     /**
-     * 有序入口逐条限流与保留原文，正常终态完成所有成员的 Webhook 去重占用。
-     * @param input 不含凭证的完整入站
+     * 对已记录原文且通过关注状态的入站逐条限流，正常终态完成所有成员的 Webhook 去重占用。
+     * @param input AiChatService 已独立记录、不含凭证的完整入站
      * @param token 当前即时流程凭证，原子准入后仅协调器持有
      * @return 整轮实际工作及清理退出后的正常完成阶段
      */
@@ -95,9 +96,6 @@ public class AggregatedChatFlow {
             lease.close(); dependencyFailure("invalid_input",failure); return CompletableFuture.completedStage(null);
         }
         try {
-            chat.recordMessage(input.userId(),"INBOUND",input.messageId(),"TEXT",input.content(),input.occurredAt(),
-                    new ChatMetadata("USER",input.userId(),"LEGACY",input.messageId(),input.correlationId(),input.receivedAt(),input.sequence(),null,null,null,null));
-            memory.observe(input.userId(),input.messageId(),input.occurredAt(),input.receivedAt(),input.sequence());
             if (!coordination.allow(input.userId())) {
                 meters.counter("ai.rate_limited").increment();
                 log(LogEvents.USER_RATE_LIMITED,"User rate limited",BusinessLog.fields("outcome","SKIPPED"));
@@ -134,10 +132,11 @@ public class AggregatedChatFlow {
     }
     private void execute(TurnTicket ticket,TurnSnapshot snapshot,Deadline deadline) {
         if (ticket.kind()!=TurnTicket.Kind.GENERATION) {
-            var advice=rules.decide(snapshot.members(),aggregation.ruleWait());
+            var advice=ticket.kind()==TurnTicket.Kind.RULE?rules.decide(snapshot.members(),aggregation.ruleWait()):timing.decide(turns,ticket,snapshot,deadline);
+            if(advice==null)return;
             boolean applied=turns.completeDecision(ticket,advice);
-            log(LogEvents.AI_TURN_DECIDED,"AI rule timing decision",BusinessLog.fields("turn_id",ticket.turnId(),"member_count",snapshot.members().size(),
-                    "input_version",ticket.inputVersion(),"reason",advice.reason(),"content",BusinessLog.fields("action",advice.action(),"wait_ms",advice.waitFor().toMillis()),
+            log(LogEvents.AI_TURN_DECIDED,"AI timing decision",BusinessLog.fields("turn_id",ticket.turnId(),"member_count",snapshot.members().size(),
+                    "input_version",ticket.inputVersion(),"reason",advice.reason(),"content",BusinessLog.fields("action",advice.action(),"wait_ms",advice.waitFor().toMillis(),"source",ticket.kind()),
                     "outcome",applied?"SUCCESS":"SKIPPED"));
             return;
         }

@@ -42,11 +42,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-/** Executable documentation: real inbound HTTP -> worker -> SDK -> local HTTP stub. */
-/** 使用文档样例验证真实 HTTP 入站、异步分发、SDK 出站、幂等重试和敏感日志边界。 */
+/** 显式 RULE 基线验证文档 HTTP/SDK/存储契约，MODEL 时机另由 ModelTimingFlowIntegrationTest 和真实 SDK 替身测试覆盖。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "line.bot.channel-secret=documentation-test-secret",
         "line.bot.channel-token=documentation-test-token",
+        "line.ai.decision.mode=RULE",
         "line.internal-push.enabled=true",
         "line.internal-push.token=documentation-internal-token"
 })
@@ -143,12 +143,12 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
             assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-" + name + ".json")), true)
                     .getStatusCode()).isEqualTo(HttpStatus.OK);
         }
-        awaitWorkers();
-        assertThat(stub.replies).isEmpty();
-
-        var output = new ByteArrayOutputStream();
-        assertThat(contentService.downloadTo("537629183902005", output))
-                .isEqualTo(LocalLineStub.CONTENT.length);
+        awaitWorkers();assertThat(jdbc.queryForObject("SELECT status FROM line_user WHERE user_id=?",String.class,userId)).isEqualTo("UNFOLLOWED");
+        assertThat(jdbc.queryForObject("SELECT lifecycle_event_id FROM line_user WHERE user_id=?",String.class,userId)).isEqualTo(readJson("webhook/webhook-unfollow.json").path("events").get(0).path("webhookEventId").asText());
+        assertThat(send(Files.readAllBytes(EXAMPLES.resolve("webhook/webhook-refollow.json")),true).getStatusCode()).isEqualTo(HttpStatus.OK);
+        awaitWorkers();assertThat(jdbc.queryForObject("SELECT status FROM line_user WHERE user_id=?",String.class,userId)).isEqualTo("FOLLOWING");
+        assertThat(jdbc.queryForObject("SELECT unfollowed_at FROM line_user WHERE user_id=?",java.sql.Timestamp.class,userId)).isNull();assertThat(stub.replies).isEmpty();
+        var output = new ByteArrayOutputStream();assertThat(contentService.downloadTo("537629183902005", output)).isEqualTo(LocalLineStub.CONTENT.length);
         assertThat(output.toByteArray()).isEqualTo(LocalLineStub.CONTENT);
         assertThat(stub.contentAuthorization.get()).isEqualTo("Bearer documentation-test-token");
         assertThat(stub.contentPath.get()).isEqualTo("/v2/bot/message/537629183902005/content");
@@ -220,7 +220,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
                         textEvent.path("replyToken").asText(), textEvent.path("message").path("quoteToken").asText());
         assertThat(jdbc.queryForList("SELECT detail::text FROM audit_log", String.class).toString())
                 .doesNotContain("documentation-test-token", "documentation-internal-token");
-        assertThat(meters.get("webhook.requests").counter().count()).isEqualTo(12);
+        assertThat(meters.get("webhook.requests").counter().count()).isEqualTo(13);
         assertThat(meters.get("webhook.signature.failed").counter().count()).isEqualTo(1);
         assertThat(meters.get("webhook.dedup.hits").counter().count()).isEqualTo(1);
         assertThat(meters.get("line.push.failed").counter().count()).isZero();
@@ -266,7 +266,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
         try {
             assertThat(send(body,true).getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
-            await().atMost(Duration.ofSeconds(3)).until(() -> jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='INBOUND'",Integer.class,user)==3);
+            await().atMost(Duration.ofSeconds(3)).until(() -> jdbc.queryForObject("SELECT count(*) FROM chat_message WHERE user_id=? AND direction='INBOUND'",Integer.class,user)==3);awaitAdmissions();
             release.countDown();var sent=stub.replies.poll(5,TimeUnit.SECONDS);assertThat(sent).isNotNull();
             assertThat(sent.body()).isEqualTo(readJson("reply/reply-aggregate-three-request.json"));
             awaitWorkers();awaitPersistence();await().atMost(Duration.ofSeconds(5)).until(eventRecorder::isIdle);
@@ -300,7 +300,7 @@ class DocumentedFlowIntegrationTest extends PostgresIntegrationSupport {
 
     private void awaitWorkers() {
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookAdmissionExecutor.getActiveCount()==0 && webhookAdmissionExecutor.getQueueSize()==0);
-        await().atMost(Duration.ofSeconds(5)).until(aiScheduler::isIdle);
+        awaitAdmissions();await().atMost(Duration.ofSeconds(5)).until(aiScheduler::isIdle);
         await().atMost(Duration.ofSeconds(5)).until(() -> webhookExecutor.getActiveCount() == 0
                 && webhookExecutor.getThreadPoolExecutor().getQueue().isEmpty());
     }

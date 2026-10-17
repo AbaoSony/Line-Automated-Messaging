@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 /** 在有界线程池隔离历史查询等待；超时忽略迟到结果，实际执行中的操作仍计入删除等待。 */
 @Component
-public class DependencyCalls implements DisposableBean {
+public class DependencyCalls implements DisposableBean,org.springframework.context.SmartLifecycle {
     private final ThreadPoolExecutor executor;
     private final UserWorkTracker tracker;
     private final AiProperties properties;
@@ -46,6 +46,22 @@ public class DependencyCalls implements DisposableBean {
         catch(InterruptedException failure) { pending.cancel(true);Thread.currentThread().interrupt();throw new IllegalStateException("Dependency interrupted"); }
         catch(ExecutionException | TimeoutException failure) { pending.cancel(true);throw new IllegalStateException("Dependency unavailable"); }
     }
-    /** 停机结束依赖调用，迟到读取不能在后续会话产生副作用。 */
-    @Override public void destroy() { executor.shutdownNow(); }
+    /** 无需独立启动，依赖工作按需运行。 */
+    @Override public void start() {}
+    /** @return 是否仍允许提交依赖读取 */
+    @Override public boolean isRunning(){return !executor.isShutdown();}
+    /** @return AI 停止后、业务持久化和日志停止前 */
+    @Override public int getPhase(){return com.example.line.common.persistence.DrainingTaskExecutor.PERSISTENCE_PHASE+2;}
+    /**
+     * 中止依赖等待并限时核实实际读取退出，避免销毁时才产生迟到日志。
+     * @throws IllegalStateException 实际读取无法结束或等待中断时抛出
+     */
+    @Override public void stop() {
+        executor.shutdownNow();
+        try{if(!executor.awaitTermination(properties.totalTimeout().toMillis(),TimeUnit.MILLISECONDS))
+            throw new IllegalStateException("Dependency shutdown did not drain");}
+        catch(InterruptedException failure){Thread.currentThread().interrupt();throw new IllegalStateException("Dependency shutdown interrupted");}
+    }
+    /** Bean 销毁兜底；正常停机已经在日志刷出之前完成。 */
+    @Override public void destroy() { if(!executor.isTerminated())stop(); }
 }

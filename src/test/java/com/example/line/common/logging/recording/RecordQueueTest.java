@@ -136,4 +136,23 @@ class RecordQueueTest {
         return RecordData.snapshot(Map.of("event", LogEvents.USER_MESSAGE_RECEIVED, "trace_id", "fictional-queue-trace",
                 "user_id", "Ufictional-queue-user", "content", Map.of("text", "完整虚构消息")));
     }
+
+    @Test void nextDeletionWaitsForPreviousDeletionAuditActualExitBeforeRemovingHistoricalRecords()throws Exception{
+        var tracker=new com.example.line.common.execution.UserWorkTracker();var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
+        var queue=new RecordQueue(batch -> {entered.countDown();try{assertThat(release.await(2,TimeUnit.SECONDS)).isTrue();}
+            catch(InterruptedException failure){throw new AssertionError(failure);}},properties(10,1),new SimpleMeterRegistry(),tracker);
+        queue.start();String user="Ufictional-deletion-audit";
+        try{
+            try(var first=tracker.block(user)){
+                first.await(Duration.ofMillis(20));first.committed();
+                assertThat(queue.offer(true,RecordData.snapshot(Map.of("event",LogEvents.USER_DATA_DELETED,"user_id",user,
+                        "target_user_id",user,"trace_id","fictional-audit-trace","outcome","SUCCESS")))).isTrue();
+            }
+            assertThat(entered.await(1,TimeUnit.SECONDS)).isTrue();
+            try(var second=tracker.block(user)){
+                assertThatThrownBy(() -> second.await(Duration.ofMillis(30))).isInstanceOf(IllegalStateException.class);
+                release.countDown();second.await(Duration.ofSeconds(1));
+            }
+        }finally{release.countDown();queue.close();}
+    }
 }

@@ -50,7 +50,15 @@ line:
       max-regenerations: ${AI_AGGREGATION_MAX_REGENERATIONS:1}
       max-generation-attempts: ${AI_AGGREGATION_MAX_GENERATION_ATTEMPTS:2}
     decision:
-      mode: ${AI_DECISION_MODE:RULE}
+      mode: ${AI_DECISION_MODE:MODEL}
+      reasoning: ${AI_DECISION_REASONING:low}
+      attempt-timeout: ${AI_DECISION_ATTEMPT_TIMEOUT:2s}
+      max-attempts: ${AI_DECISION_MAX_ATTEMPTS:2}
+      max-concurrent: ${AI_DECISION_MAX_CONCURRENT:1}
+      max-input-tokens: ${AI_DECISION_MAX_INPUT_TOKENS:4096}
+      max-output-tokens: ${AI_DECISION_MAX_OUTPUT_TOKENS:1024}
+      failure-threshold: ${AI_DECISION_FAILURE_THRESHOLD:5}
+      cooldown: ${AI_DECISION_COOLDOWN:30s}
       technical-reply-cooldown: ${AI_TECHNICAL_REPLY_COOLDOWN:10s}
     total-timeout: ${AI_TOTAL_TIMEOUT:45s}
     send-reserve: ${AI_SEND_RESERVE:3s}
